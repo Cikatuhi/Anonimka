@@ -29,7 +29,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👋 Привет, {first_name}!\n\n"
         f"Твой уникальный ID: `{user_id}`\n"
         f"👉 Твоя персональная ссылка:\n{deep_link}\n\n"
-        f"Добавь эту ссылку ☝️ в описание профиля Telegram/TikTok/Instagram и в истории, <b>что-бы получать послания</b>💌"
+        f"Добавь эту ссылку ☝️ в описание профиля Telegram/TikTok/Instagram и в истории, что-бы получать послания💌"
     )
     
     # 4. Кнопка для копирования
