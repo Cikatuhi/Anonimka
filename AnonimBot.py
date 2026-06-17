@@ -41,7 +41,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         welcome_text,
         reply_markup=reply_markup,
-        parse_mode="Markdown"
+        parse_mode=None
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
