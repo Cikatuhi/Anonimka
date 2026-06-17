@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 load_dotenv()
-TOKEN = "8751506578:AAGQ3A5hV-d5la453x4UV0UF16xCW-x1x0I"
+TOKEN = "8751506578:AAGQ3A5hV-d5la4s3x4UV0UFl6xCW-x1x0I"
 
 logging.basicConfig(level=logging.INFO)
 
