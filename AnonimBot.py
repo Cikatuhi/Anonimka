@@ -7,7 +7,9 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 load_dotenv()
-TOKEN = "8751506578:AAGQ3A5hV-d5la4s3x4UV0UFl6xCW-x1x0I"
+TOKEN = os.getenv("BOT_TOKEN")
+
+print("Токен из .env:", repr(TOKEN))
 
 logging.basicConfig(level=logging.INFO)
 
@@ -21,7 +23,6 @@ def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-
     print("Бот запущен...")
     app.run_polling()
 
