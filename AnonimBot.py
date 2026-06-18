@@ -50,7 +50,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Отправить можно: 📝 текст, 🎞 фото или видео, 🔊 кружки и голосовые, а также стикеры ✨",
                 reply_markup=reply_markup,
                 parse_mode="HTML"
-            )
+)
 
     # Если это обычный /start (без ссылки) или пришёл после отправки
     bot_username = context.bot.username
@@ -115,10 +115,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # Подтверждение отправителю
-        await update.message.reply_text(
-            f"✅ <b>Сообщение доставлено!</b>",
-            parse_mode="HTML"      
-         )   
+        await update.message.reply_text("<b>✅ Сообщение доставлено!</b>", parse_mode="HTML")
 
         # Отправляем отправителю его реферальную ссылку
         bot_username = context.bot.username
