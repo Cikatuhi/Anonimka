@@ -50,7 +50,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Отправить можно: 📝 текст, 🎞 фото или видео, 🔊 кружки и голосовые, а также стикеры ✨",
                 reply_markup=reply_markup,
                 parse_mode="HTML"
-)
+            )
+            return
 
     # Если это обычный /start (без ссылки) или пришёл после отправки
     bot_username = context.bot.username
