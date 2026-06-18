@@ -51,7 +51,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=reply_markup,
                 parse_mode="HTML"
             )
-            return
+            return  
 
     # Если это обычный /start (без ссылки) или пришёл после отправки
     bot_username = context.bot.username
@@ -110,7 +110,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_video_note(chat_id=recipient_id, video_note=video_note)
         elif update.message.sticker:
             sticker = update.message.sticker.file_id
-            await context.bot.send_sticker(chat_id=recipient_id, sticker=sticker)
+            await context.bot.send_message(
+                chat_id=recipient_id,
+                text="✉️ Вам пришёл анонимный стикер:"
+            )
+            await context.bot.send_sticker(
+                chat_id=recipient_id,
+                sticker=sticker
+            )
         else:
             await update.message.reply_text("⚠️ Этот тип сообщения пока не поддерживается.")
             return
