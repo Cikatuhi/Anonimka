@@ -19,7 +19,7 @@ async def init_db():
     try:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                user BIGINT PRIMARY KEY,
+                telegram_id BIGINT PRIMARY KEY,
                 username TEXT,
                 first_name TEXT,
                 registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -28,33 +28,29 @@ async def init_db():
     finally:
         await conn.close()
 
-async def register_user(user: int, username: str, first_name: str):
+async def register_user(user_id: int, username: str, first_name: str):
     conn = await asyncpg.connect(DATABASE_URL)
     try:
-        # Проверяем, есть ли пользователь
         result = await conn.fetchrow(
-            "SELECT user FROM users WHERE user = $1",
-            user
+            "SELECT telegram_id FROM users WHERE telegram_id = $1",
+            user_id
         )
-        
         if not result:
-            # Вставляем нового пользователя
             await conn.execute(
-                "INSERT INTO users (user, username, first_name) VALUES ($1, $2, $3)",
-                user, username, first_name
+                "INSERT INTO users (telegram_id, username, first_name) VALUES ($1, $2, $3)",
+                user_id, username, first_name
             )
             return True
         return False
     finally:
         await conn.close()
 
-async def get_user(user: int):
-    """Получить данные пользователя по ID"""
+async def get_user(user_id: int):
     conn = await asyncpg.connect(DATABASE_URL)
     try:
         return await conn.fetchrow(
-            "SELECT * FROM users WHERE user = $1",
-            user
+            "SELECT * FROM users WHERE telegram_id = $1",
+            user_id
         )
     finally:
         await conn.close()
