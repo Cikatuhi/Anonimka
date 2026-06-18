@@ -31,10 +31,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Добавь эту ссылку ☝️ в описание профиля Telegram/TikTok/Instagram и в истории, чтобы получать послания💌"
     )
     
-    # 4. Кнопка "Поделиться ссылкой"
-    share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉{share_text}"
+# 4. Кнопка "Поделиться ссылкой"
+    share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
     share_keyboard = [
-    [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}")]
+    [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
 ]
     reply_markup = InlineKeyboardMarkup(share_keyboard)
     
