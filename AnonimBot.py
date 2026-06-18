@@ -45,7 +45,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await update.message.reply_text(
-                f"💌 Отправьте анонимное сообщение {recipient_name}!\n\n"
+                f"💌 Отправьте анонимное сообщение этому человеку!\n\n"
                 f"✍️ Напишите сюда всё, что хотите ему передать, и {recipient_name} увидит ваше сообщение сразу же, но не будет знать, от кого оно.\n\n"
                 f"Отправить можно: 📝 текст, 🎞 фото или видео, 🔊 кружки и голосовые, а также стикеры ✨",
                 reply_markup=reply_markup
