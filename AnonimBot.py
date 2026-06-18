@@ -51,7 +51,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=reply_markup,
                 parse_mode="HTML"
             )
-            return  
+            return  # ⬅️ Важный return, чтобы не отправлять реферальную ссылку сразу
 
     # Если это обычный /start (без ссылки) или пришёл после отправки
     bot_username = context.bot.username
@@ -110,10 +110,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_video_note(chat_id=recipient_id, video_note=video_note)
         elif update.message.sticker:
             sticker = update.message.sticker.file_id
+            # Сначала уведомление
             await context.bot.send_message(
                 chat_id=recipient_id,
                 text="✉️ Вам пришёл анонимный стикер:"
             )
+            # Потом сам стикер
             await context.bot.send_sticker(
                 chat_id=recipient_id,
                 sticker=sticker
@@ -131,7 +133,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         welcome_text = (
             f"<b>💌 Начните получать анонимные сообщения прямо сейчас!</b>\n\n"
-            f"🔗 Ваша ссылка:\n{deep_link}\n\n"
+            f"👉 Твоя ссылка:\n{deep_link}\n\n"
             f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
         )
 
