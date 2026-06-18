@@ -9,7 +9,7 @@ app = Flask(__name__)
 # Конфигурация
 REPO_PATH = "/root/Anonimno-Artem-"
 SECRET = "1f0r2a9g3p8o4i7n5t6"
-BOT_SERVICE = "telegram-bot.service"
+BOT_SERVICE = "webhook-handler.service"
 
 @app.route('/webhook', methods=['POST'])
 def handle_webhook():
