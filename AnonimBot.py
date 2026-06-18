@@ -32,16 +32,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     # 4. Кнопка "Поделиться ссылкой"
+    share_text = f"Привет! Моя ссылка для анонимных сообщений: {deep_link}"
     share_keyboard = [
-    [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}")]
+    [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
 ]
     reply_markup = InlineKeyboardMarkup(share_keyboard)
     
     await update.message.reply_text(
         welcome_text,
         reply_markup=reply_markup,
-        parse_mode=None
+        parse_mode=None,
+        disable_web_page_preview=True
     )
+        
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Я умею: /start — получить свою ссылку")
