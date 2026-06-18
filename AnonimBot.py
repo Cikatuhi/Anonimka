@@ -32,7 +32,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
 # 4. Кнопка "Поделиться ссылкой"
-    share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
+    share_text = f"👆Отправь мне анонимное сообщение, по этой ссылке 👆"
     share_keyboard = [
     [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
 ]
