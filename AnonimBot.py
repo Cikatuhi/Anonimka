@@ -131,7 +131,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         welcome_text = (
             f"<b>💌 Начните получать анонимные сообщения прямо сейчас!</b>\n\n"
-            f"👉 Твоя ссылка:\n{deep_link}\n\n"
+            f"🔗 Ваша ссылка:\n{deep_link}\n\n"
             f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
         )
 
