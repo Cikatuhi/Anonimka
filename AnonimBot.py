@@ -45,12 +45,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await update.message.reply_text(
-                f"💌 Отправьте анонимное сообщение этому человеку!\n\n"
-                f"✍️ Напишите сюда всё, что хотите ему передать, и {recipient_name} увидит ваше сообщение сразу же, но не будет знать, от кого оно.\n\n"
+                f"<b>💌 Отправьте анонимное сообщение этому человеку!</b>\n\n"
+                f"<b>✍️ Напишите сюда всё, что хотите ему передать</b>, и {recipient_name} увидит ваше сообщение сразу же, но не будет знать, от кого оно.\n\n"
                 f"Отправить можно: 📝 текст, 🎞 фото или видео, 🔊 кружки и голосовые, а также стикеры ✨",
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                parse_mode="HTML"
             )
-            return
 
     # Если это обычный /start (без ссылки) или пришёл после отправки
     bot_username = context.bot.username
@@ -115,7 +115,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # Подтверждение отправителю
-        await update.message.reply_text("✅ Сообщение доставлено!")
+        await update.message.reply_text(
+            f"✅ <b>Сообщение доставлено!</b>",
+            parse_mode="HTML"      
+         )   
 
         # Отправляем отправителю его реферальную ссылку
         bot_username = context.bot.username
