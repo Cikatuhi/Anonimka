@@ -26,9 +26,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # 3. Приветственное сообщение
     welcome_text = (
-        f"👋 Привет, {first_name}!\n\n"
-        f"Твой уникальный ID: `{user_id}`\n"
-        f"👉 Твоя персональная ссылка:\n{deep_link}\n\n"
+        f"💬 Начни получать анонимные сообщения прямо сейчас!\n\n"
+        f"👉 Твоя ссылка:\n{deep_link}\n\n"
         f"Добавь эту ссылку ☝️ в описание профиля Telegram/TikTok/Instagram и в истории, что-бы получать послания💌"
     )
     
