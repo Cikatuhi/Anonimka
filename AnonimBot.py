@@ -3,7 +3,7 @@ import logging
 import os
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, ContextTypes
 import database
 
 load_dotenv()
@@ -28,14 +28,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         f"💬 Начни получать анонимные сообщения прямо сейчас!\n\n"
         f"👉 Твоя ссылка:\n{deep_link}\n\n"
-        f"Добавь эту ссылку ☝️ в описание профиля Telegram/TikTok/Instagram и в истории, что-бы получать послания💌"
+        f"Добавь эту ссылку ☝️ в описание профиля Telegram/TikTok/Instagram и в истории, чтобы получать послания💌"
     )
     
-    # 4. Кнопка для копирования
-    keyboard = [
-        [InlineKeyboardButton("📋 Копировать ссылку", callback_data="copy_link")]
+    # 4. Кнопка "Поделиться ссылкой"
+    share_keyboard = [
+        [InlineKeyboardButton("📤 Поделиться ссылкой", switch_inline_query=f"Привет! Моя ссылка для анонимных сообщений: {deep_link}")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = InlineKeyboardMarkup(share_keyboard)
     
     await update.message.reply_text(
         welcome_text,
@@ -46,19 +46,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Я умею: /start — получить свою ссылку")
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == "copy_link":
-        user_id = query.from_user.id
-        bot_username = context.bot.username
-        deep_link = f"https://t.me/{bot_username}?start={user_id}"
-        await query.edit_message_text(
-            text=f"Скопируй эту ссылку:\n`{deep_link}`",
-            parse_mode="Markdown"
-        )
-
 def main():
     # Инициализация базы данных
     asyncio.run(database.init_db())
@@ -66,7 +53,6 @@ def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(button_handler))
     
     print("🤖 Бот запущен и подключен к PostgreSQL...")
     app.run_polling()
