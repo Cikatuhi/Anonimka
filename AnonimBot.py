@@ -130,9 +130,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         deep_link = f"https://t.me/{bot_username}?start={user_id}"
 
         welcome_text = (
-            f"💬 Начни получать анонимные сообщения прямо сейчас!\n\n"
+            f"<b>💌 Начните получать анонимные сообщения прямо сейчас!</b>\n\n"
             f"👉 Твоя ссылка:\n{deep_link}\n\n"
-            f"Добавь эту ссылку ☝️ в описание профиля Telegram/TikTok/Instagram и в истории, чтобы получать послания💌"
+            f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
         )
 
         share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
@@ -144,7 +144,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             welcome_text,
             reply_markup=reply_markup,
-            parse_mode=None,
+            parse_mode="HTML",
             disable_web_page_preview=True
         )
 
