@@ -185,32 +185,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(reply_keyboard)
 
+        # --- СОХРАНЯЕМ СООБЩЕНИЕ В БД ---
+        content = "медиа-файл"
+        content_type = "text"
+
         if update.message.text:
             content = update.message.text
+            content_type = "text"
             await context.bot.send_message(
                 chat_id=recipient_id,
                 text=f"✉️ Вам пришло анонимное сообщение:\n\n{content}",
                 reply_markup=reply_markup
             )
         elif update.message.photo:
+            content_type = "photo"
+            content = update.message.caption or "фото"
             photo = update.message.photo[-1].file_id
-            caption = update.message.caption or ""
             await context.bot.send_photo(
                 chat_id=recipient_id,
                 photo=photo,
-                caption=f"✉️ Вам пришло анонимное фото:\n\n{caption}",
+                caption=f"✉️ Вам пришло анонимное фото:\n\n{content}",
                 reply_markup=reply_markup
             )
         elif update.message.video:
+            content_type = "video"
+            content = update.message.caption or "видео"
             video = update.message.video.file_id
-            caption = update.message.caption or ""
             await context.bot.send_video(
                 chat_id=recipient_id,
                 video=video,
-                caption=f"✉️ Вам пришло анонимное видео:\n\n{caption}",
+                caption=f"✉️ Вам пришло анонимное видео:\n\n{content}",
                 reply_markup=reply_markup
             )
         elif update.message.voice:
+            content_type = "voice"
+            content = "голосовое сообщение"
             voice = update.message.voice.file_id
             await context.bot.send_voice(
                 chat_id=recipient_id,
@@ -219,6 +228,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=reply_markup
             )
         elif update.message.video_note:
+            content_type = "video_note"
+            content = "кружок"
             video_note = update.message.video_note.file_id
             await context.bot.send_video_note(
                 chat_id=recipient_id,
@@ -226,6 +237,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=reply_markup
             )
         elif update.message.sticker:
+            content_type = "sticker"
+            content = "стикер"
             sticker = update.message.sticker.file_id
             await context.bot.send_message(
                 chat_id=recipient_id,
@@ -239,6 +252,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("⚠️ Этот тип сообщения пока не поддерживается.")
             return
+
+        # Сохраняем сообщение в базу данных
+        await database.save_message(user_id, recipient_id, content, content_type)
 
         keyboard = [
             [InlineKeyboardButton("📨 Отправить ещё одно сообщение", callback_data=f"send_again_{recipient_id}_{recipient_name}")]

@@ -54,3 +54,13 @@ async def get_user(user_id: int):
         )
     finally:
         await conn.close()
+        
+async def save_message(sender_id: int, recipient_id: int, content: str, content_type: str = 'text'):
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        await conn.execute(
+            "INSERT INTO messages (sender_id, recipient_id, content, content_type) VALUES ($1, $2, $3, $4)",
+            sender_id, recipient_id, content, content_type
+        )
+    finally:
+        await conn.close()        
