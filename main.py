@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI(title="Admin Panel для Telegram Бота")
-
 templates = Jinja2Templates(directory="templates")
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -23,51 +22,14 @@ DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NA
 async def get_db():
     return await asyncpg.connect(DATABASE_URL)
 
-async def table_exists(conn, table_name):
-    result = await conn.fetchval(
-        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = $1)",
-        table_name
-    )
-    return result
-
-async def column_exists(conn, table_name, column_name):
-    result = await conn.fetchval(
-        "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2)",
-        table_name, column_name
-    )
-    return result
-
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     conn = await get_db()
     try:
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
-        total_messages = await conn.fetchval("SELECT COUNT(*) FROM messages") if await table_exists(conn, "messages") else 0
-        total_payments = await conn.fetchval("SELECT COUNT(*) FROM payments") if await table_exists(conn, "payments") else 0
-        total_premium = await conn.fetchval("SELECT COUNT(*) FROM users WHERE premium = true") if await column_exists(conn, "users", "premium") else 0
-
-        stats = []
-        for i in range(6, -1, -1):
-            date = datetime.now().date() - timedelta(days=i)
-            count = await conn.fetchval(
-                "SELECT COUNT(*) FROM users WHERE DATE(registered_at) = $1",
-                date
-            )
-            stats.append({
-                "date": date.strftime("%d.%m"),
-                "new_users": count or 0,
-                "active_users": count or 0,
-                "messages": 0
-            })
-
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
-            "total_users": total_users or 0,
-            "total_messages": total_messages or 0,
-            "total_payments": total_payments or 0,
-            "total_premium": total_premium or 0,
-            "total_revenue": "0.00",
-            "stats": stats
+            "total_users": total_users or 0
         })
     finally:
         await conn.close()
