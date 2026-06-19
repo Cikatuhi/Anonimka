@@ -92,8 +92,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recipient_name = session['recipient_name']
 
     try:
-        # Создаём кнопку "Ответить анонимно"
-        reply_keyboard = [[InlineKeyboardButton("🔒 Ответить анонимно", callback_data="reply_anon")]]
+        # Создаём две кнопки под сообщением
+        reply_keyboard = [
+            [
+                InlineKeyboardButton("🔒 Ответить анонимно", callback_data="reply_anon"),
+                InlineKeyboardButton("👤 Узнать кто это", callback_data="who_is_it", style="primary")
+            ]
+        ]
         reply_markup = InlineKeyboardMarkup(reply_keyboard)
 
         # Отправляем сообщение получателю (анонимно)
@@ -144,7 +149,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=recipient_id,
                 text="✉️ Вам пришёл анонимный стикер:"
             )
-            # Потом сам стикер с кнопкой
+            # Потом сам стикер с кнопками
             await context.bot.send_sticker(
                 chat_id=recipient_id,
                 sticker=sticker,
@@ -240,6 +245,16 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode="HTML"
     )
 
+async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    # Пока просто показываем уведомление
+    await query.edit_message_text(
+        text=query.message.text + "\n\n🔧 Функция \"Узнать кто это\" будет доступна позже!",
+        parse_mode="HTML"
+    )
+
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🌟 ℹ️ <b>Информация</b> 🌟\n\n"
@@ -268,6 +283,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cancel_handler, pattern="cancel"))
     app.add_handler(CallbackQueryHandler(send_again_handler, pattern="send_again_"))
     app.add_handler(CallbackQueryHandler(reply_anon_handler, pattern="reply_anon"))
+    app.add_handler(CallbackQueryHandler(who_is_it_handler, pattern="who_is_it"))
 
     print("🤖 Бот запущен и готов к приёму анонимных сообщений...")
     app.run_polling()
