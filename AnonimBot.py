@@ -326,25 +326,30 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
 
     if user_id in reply_sessions:
+        # Удаляем ID получателя из сессии
         del reply_sessions[user_id]
 
+        # Восстанавливаем исходное сообщение
         if 'original_text' in context.user_data:
             try:
                 original_text = context.user_data.get('original_text', 'Сообщение')
                 original_reply_markup = context.user_data.get('original_reply_markup')
+                original_chat_id = context.user_data.get('original_chat_id', user_id)
 
-                # Восстанавливаем исходное сообщение
-                await query.edit_message_text(
+                # Отправляем новое сообщение с исходным текстом
+                await context.bot.send_message(
+                    chat_id=original_chat_id,
                     text=original_text,
                     reply_markup=original_reply_markup,
                     parse_mode="HTML"
                 )
+                # Удаляем текущее сообщение с вопросом
+                await query.delete_message()
                 context.user_data.clear()
                 return
             except Exception as e:
                 print(f"Ошибка восстановления: {e}")
 
-        # Если восстановить не удалось — просто удаляем сообщение с вопросом
         await query.delete_message()
         return
 
@@ -381,16 +386,15 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         # Если новый получатель отличается от старого — отменяем старый ответ
         if new_recipient is not None and new_recipient != old_recipient:
-            # Удаляем предыдущее сообщение с вопросом (оно в контексте)
-            if 'original_message_id' in context.user_data:
+            # Проверяем, есть ли сообщение с вопросом, и удаляем его
+            if 'question_message_id' in context.user_data:
                 try:
-                    # Удаляем старое сообщение (то, которое было с вопросом)
                     await context.bot.delete_message(
                         chat_id=user_id,
-                        message_id=context.user_data.get('original_message_id')
+                        message_id=context.user_data.get('question_message_id')
                     )
                 except Exception as e:
-                    print(f"Не удалось удалить старое сообщение: {e}")
+                    print(f"Не удалось удалить сообщение с вопросом: {e}")
             
             # Удаляем сессию
             del reply_sessions[user_id]
@@ -399,7 +403,6 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Сохраняем оригинальное сообщение для восстановления при отмене
     context.user_data['original_text'] = original_message.text
     context.user_data['original_chat_id'] = original_message.chat_id
-    context.user_data['original_message_id'] = original_message.message_id
     context.user_data['original_reply_markup'] = original_message.reply_markup
 
     if data == "reply_anon":
@@ -407,12 +410,15 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await query.edit_message_text(
+        # Редактируем сообщение на вопрос
+        msg = await query.edit_message_text(
             text=f"<b>✍️ Напишите ваш ответ администратору</b>\n\n"
                  f"Ваше сообщение будет отправлено анонимно.",
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
+        # Сохраняем ID сообщения с вопросом
+        context.user_data['question_message_id'] = msg.message_id
         return
 
     if data.startswith("reply_"):
@@ -425,12 +431,15 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
-                await query.edit_message_text(
+                # Редактируем сообщение на вопрос
+                msg = await query.edit_message_text(
                     text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
                          f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
                     reply_markup=reply_markup,
                     parse_mode="HTML"
                 )
+                # Сохраняем ID сообщения с вопросом
+                context.user_data['question_message_id'] = msg.message_id
                 return
             except ValueError:
                 pass
