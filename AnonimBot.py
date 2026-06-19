@@ -344,7 +344,8 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 print(f"Ошибка восстановления: {e}")
 
-        await query.edit_message_text("❌ Отправка ответа отменена.")
+        # Если восстановить не удалось — просто удаляем сообщение с вопросом
+        await query.delete_message()
         return
 
     if user_id in active_sessions:
@@ -380,9 +381,10 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         # Если новый получатель отличается от старого — отменяем старый ответ
         if new_recipient is not None and new_recipient != old_recipient:
-            # Удаляем предыдущее сообщение с вопросом (если оно есть)
+            # Удаляем предыдущее сообщение с вопросом (оно в контексте)
             if 'original_message_id' in context.user_data:
                 try:
+                    # Удаляем старое сообщение (то, которое было с вопросом)
                     await context.bot.delete_message(
                         chat_id=user_id,
                         message_id=context.user_data.get('original_message_id')
@@ -390,6 +392,7 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 except Exception as e:
                     print(f"Не удалось удалить старое сообщение: {e}")
             
+            # Удаляем сессию
             del reply_sessions[user_id]
             context.user_data.clear()
 
@@ -405,8 +408,8 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
-                 f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
+            text=f"<b>✍️ Напишите ваш ответ администратору</b>\n\n"
+                 f"Ваше сообщение будет отправлено анонимно.",
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
