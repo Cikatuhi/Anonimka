@@ -68,7 +68,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
     share_keyboard = [
-        [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
+        [InlineKeyboardButton("📤 Поделиться ссылкой", switch_inline_query=f"Отправь мне анонимное сообщение, по этой ссылке 👉 {deep_link}")]
     ]
     reply_markup = InlineKeyboardMarkup(share_keyboard)
 
@@ -151,7 +151,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
         share_keyboard = [
-            [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
+            [InlineKeyboardButton("📤 Поделиться ссылкой", switch_inline_query=f"Отправь мне анонимное сообщение, по этой ссылке 👉 {deep_link}")]
         ]
         share_reply_markup = InlineKeyboardMarkup(share_keyboard)
 
