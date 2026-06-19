@@ -333,6 +333,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 original_text = context.user_data.get('original_text', 'Сообщение')
                 original_reply_markup = context.user_data.get('original_reply_markup')
 
+                # Восстанавливаем исходное сообщение
                 await query.edit_message_text(
                     text=original_text,
                     reply_markup=original_reply_markup,
@@ -361,6 +362,7 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     original_message = query.message
 
+    # Если пользователь уже отвечал — отменяем предыдущий ответ
     if user_id in reply_sessions:
         old_recipient = reply_sessions[user_id]
 
@@ -376,10 +378,22 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             else:
                 new_recipient = None
 
+        # Если новый получатель отличается от старого — отменяем старый ответ
         if new_recipient is not None and new_recipient != old_recipient:
+            # Удаляем предыдущее сообщение с вопросом (если оно есть)
+            if 'original_message_id' in context.user_data:
+                try:
+                    await context.bot.delete_message(
+                        chat_id=user_id,
+                        message_id=context.user_data.get('original_message_id')
+                    )
+                except Exception as e:
+                    print(f"Не удалось удалить старое сообщение: {e}")
+            
             del reply_sessions[user_id]
             context.user_data.clear()
 
+    # Сохраняем оригинальное сообщение для восстановления при отмене
     context.user_data['original_text'] = original_message.text
     context.user_data['original_chat_id'] = original_message.chat_id
     context.user_data['original_message_id'] = original_message.message_id
@@ -391,8 +405,8 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            text=f"<b>✍️ Напишите ваш ответ администратору</b>\n\n"
-                 f"Ваше сообщение будет отправлено анонимно.",
+            text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
+                 f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
