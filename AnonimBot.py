@@ -145,6 +145,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text("✅ Ваш ответ отправлен анонимно!")
 
+            # Восстанавливаем исходное сообщение (с кнопками)
+            if 'original_text' in context.user_data:
+                try:
+                    original_text = context.user_data.get('original_text', 'Сообщение')
+                    original_reply_markup = context.user_data.get('original_reply_markup')
+                    original_chat_id = context.user_data.get('original_chat_id', user_id)
+
+                    await context.bot.send_message(
+                        chat_id=original_chat_id,
+                        text=original_text,
+                        reply_markup=original_reply_markup,
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    print(f"Ошибка восстановления: {e}")
+
             bot_username = context.bot.username
             deep_link = f"https://t.me/{bot_username}?start={user_id}"
 
@@ -368,7 +384,6 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # Если был старый ответ — сначала восстанавливаем его
     if user_id in reply_sessions:
-        # Удаляем сообщение с вопросом
         if 'question_message_id' in context.user_data:
             try:
                 await context.bot.delete_message(
@@ -378,7 +393,6 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except Exception as e:
                 print(f"Не удалось удалить сообщение с вопросом: {e}")
 
-        # Восстанавливаем исходное сообщение
         if 'original_text' in context.user_data:
             try:
                 original_text = context.user_data.get('original_text', 'Сообщение')
@@ -394,11 +408,9 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except Exception as e:
                 print(f"Ошибка восстановления: {e}")
 
-        # Удаляем сессию и очищаем данные
         del reply_sessions[user_id]
         context.user_data.clear()
 
-    # Теперь открываем ответ на НОВОЕ сообщение
     context.user_data['original_text'] = original_message.text
     context.user_data['original_chat_id'] = original_message.chat_id
     context.user_data['original_reply_markup'] = original_message.reply_markup
