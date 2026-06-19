@@ -92,12 +92,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recipient_name = session['recipient_name']
 
     try:
-        # Создаём две кнопки под сообщением
+        # Создаём две кнопки в столбец
         reply_keyboard = [
-            [
-                InlineKeyboardButton("🔒 Ответить анонимно", callback_data="reply_anon"),
-                InlineKeyboardButton("👤 Узнать кто это", callback_data="who_is_it", style="primary")
-            ]
+            [InlineKeyboardButton("🔒 Ответить анонимно", callback_data="reply_anon")],
+            [InlineKeyboardButton("👤 Узнать кто это", callback_data="who_is_it", style="primary")]
         ]
         reply_markup = InlineKeyboardMarkup(reply_keyboard)
 
