@@ -11,7 +11,6 @@ TOKEN = os.getenv("BOT_TOKEN")
 
 logging.basicConfig(level=logging.INFO)
 
-# Хранилище активных сессий {user_id: {'recipient_id': int, 'recipient_name': str}}
 active_sessions = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -20,25 +19,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username or "без_юзернейма"
     first_name = user.first_name or "Пользователь"
 
-    # Регистрируем пользователя в БД
     await database.register_user(user_id, username, first_name)
 
-    # Отправляем эмодзи 💌 отдельным сообщением
     await update.message.reply_text("💌")
 
-    # Проверяем, есть ли параметр start (когда перешли по ссылке)
     args = context.args
     if args:
         recipient_id = int(args[0])
         if recipient_id != user_id:
-            # Получаем имя получателя из базы данных
             recipient_data = await database.get_user(recipient_id)
             if recipient_data:
                 recipient_name = recipient_data['first_name']
             else:
                 recipient_name = "этого человека"
 
-            # Сохраняем сессию
             active_sessions[user_id] = {
                 'recipient_id': recipient_id,
                 'recipient_name': recipient_name
@@ -56,7 +50,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    # Если это обычный /start (без ссылки) — приветствие
     bot_username = context.bot.username
     deep_link = f"https://t.me/{bot_username}?start={user_id}"
 
@@ -83,7 +76,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
 
-    # Проверяем, есть ли активная сессия
     session = active_sessions.pop(user_id, None)
     if not session:
         await update.message.reply_text("Отправьте /start, чтобы получить свою ссылку.")
@@ -93,14 +85,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recipient_name = session['recipient_name']
 
     try:
-        # Создаём две кнопки в столбец
         reply_keyboard = [
             [InlineKeyboardButton("✍️ Ответить", callback_data="reply_anon")],
             [InlineKeyboardButton("👀 Узнать кто это", callback_data="who_is_it", style="primary")]
         ]
         reply_markup = InlineKeyboardMarkup(reply_keyboard)
 
-        # Отправляем сообщение получателю (анонимно)
         if update.message.text:
             content = update.message.text
             await context.bot.send_message(
@@ -143,12 +133,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         elif update.message.sticker:
             sticker = update.message.sticker.file_id
-            # Сначала уведомление
             await context.bot.send_message(
                 chat_id=recipient_id,
                 text="✉️ Вам пришёл анонимный стикер:"
             )
-            # Потом сам стикер с кнопками
             await context.bot.send_sticker(
                 chat_id=recipient_id,
                 sticker=sticker,
@@ -158,7 +146,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Этот тип сообщения пока не поддерживается.")
             return
 
-        # Подтверждение отправителю с кнопкой "Отправить ещё"
         keyboard = [
             [InlineKeyboardButton("📨 Отправить ещё одно сообщение", callback_data=f"send_again_{recipient_id}_{recipient_name}")]
         ]
@@ -170,7 +157,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-        # Отправляем отправителю его реферальную ссылку
         bot_username = context.bot.username
         deep_link = f"https://t.me/{bot_username}?start={user_id}"
 
@@ -201,14 +187,12 @@ async def send_again_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
 
-    # Извлекаем recipient_id и recipient_name из callback_data
     data = query.data.split("_")
     recipient_id = int(data[2])
     recipient_name = data[3]
 
     user_id = query.from_user.id
 
-    # Создаём новую сессию для этого пользователя
     active_sessions[user_id] = {
         'recipient_id': recipient_id,
         'recipient_name': recipient_name
@@ -239,7 +223,6 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    # Пока просто показываем уведомление
     await query.edit_message_text(
         text=query.message.text + "\n\n🔧 Функция ответа будет доступна позже!",
         parse_mode="HTML"
@@ -249,18 +232,15 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # Текст нового сообщения
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
     )
 
-    # Кнопка со ссылкой (место для ссылки)
     keyboard = [
         [InlineKeyboardButton("👀 Узнать отправителя", url="https://ваш-сайт.ру")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Отправляем новое сообщение
     await context.bot.send_message(
         chat_id=query.from_user.id,
         text=text,
