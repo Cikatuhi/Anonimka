@@ -335,6 +335,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in reply_sessions:
         del reply_sessions[user_id]
 
+        # Удаляем сообщение с вопросом
         if 'question_message_id' in context.user_data:
             try:
                 await context.bot.delete_message(
@@ -344,6 +345,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 print(f"Не удалось удалить сообщение с вопросом: {e}")
 
+        # Восстанавливаем ВСЕ исходные сообщения (каждое по одному разу)
         if 'original_messages' in context.user_data:
             for msg_data in context.user_data['original_messages']:
                 try:
@@ -356,6 +358,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     print(f"Ошибка восстановления сообщения: {e}")
 
+        # Удаляем текущее сообщение (вопрос)
         try:
             await query.delete_message()
         except Exception as e:
@@ -396,6 +399,7 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         if new_recipient is not None and new_recipient != old_recipient:
             if not context.user_data.get('answer_sent', False):
+                # Удаляем сообщение с вопросом
                 if 'question_message_id' in context.user_data:
                     try:
                         await context.bot.delete_message(
@@ -405,18 +409,18 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     except Exception as e:
                         print(f"Не удалось удалить сообщение с вопросом: {e}")
 
-                # Восстанавливаем ПЕРВОЕ исходное сообщение
-                if 'original_messages' in context.user_data and context.user_data['original_messages']:
-                    first_msg = context.user_data['original_messages'][0]
-                    try:
-                        await context.bot.send_message(
-                            chat_id=first_msg['chat_id'],
-                            text=first_msg['text'],
-                            reply_markup=first_msg['reply_markup'],
-                            parse_mode="HTML"
-                        )
-                    except Exception as e:
-                        print(f"Ошибка восстановления сообщения: {e}")
+                # Восстанавливаем ВСЕ исходные сообщения
+                if 'original_messages' in context.user_data:
+                    for msg_data in context.user_data['original_messages']:
+                        try:
+                            await context.bot.send_message(
+                                chat_id=msg_data['chat_id'],
+                                text=msg_data['text'],
+                                reply_markup=msg_data['reply_markup'],
+                                parse_mode="HTML"
+                            )
+                        except Exception as e:
+                            print(f"Ошибка восстановления сообщения: {e}")
 
                 del reply_sessions[user_id]
                 context.user_data.clear()
@@ -424,6 +428,7 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 await query.answer("⚠️ Вы уже отправили ответ на предыдущее сообщение.", show_alert=True)
                 return
 
+    # Добавляем текущее сообщение в список оригинальных
     if 'original_messages' not in context.user_data:
         context.user_data['original_messages'] = []
 
@@ -441,8 +446,8 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         msg = await query.edit_message_text(
-            text=f"<b>✍️ Напишите ваш ответ администратору</b>\n\n"
-                 f"Ваше сообщение будет отправлено анонимно.",
+            text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
+                 f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
