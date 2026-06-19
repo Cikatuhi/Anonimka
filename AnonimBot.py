@@ -164,8 +164,14 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text("❌ Отправка отменена.")
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Я умею: /start — получить свою ссылку")
+async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        f"🌟 ℹ️ <b>Информация</b> 🌟\n\n"
+        f"🍬 <b>Техническая поддержка</b>\n"
+        f"Если у вас возник вопрос, предложение или просто есть желание что-то обсудить, напишите нам – @youzabota"
+        f"⏰ Время работы: с 10:00 до 19:00 (МСК)"        
+        
+    )
 
 def main():
     asyncio.run(database.init_db())
@@ -173,7 +179,7 @@ def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("info", info_command))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(cancel_handler, pattern="cancel"))
 
