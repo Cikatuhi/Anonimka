@@ -252,12 +252,11 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Текст нового сообщения
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
-        f"👀 Нажмите на кнопку ниже, чтобы узнать отправителя."
     )
 
     # Кнопка со ссылкой (место для ссылки)
     keyboard = [
-        [InlineKeyboardButton("👀 Узнать отправителя", url="https://ваш-сайт.ру")]  # ← Вставьте свою ссылку
+        [InlineKeyboardButton("👀 Узнать отправителя", url="https://ваш-сайт.ру")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
