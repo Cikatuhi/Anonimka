@@ -371,11 +371,10 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     original_message = query.message
 
-    # Если пользователь уже отвечает на другое сообщение
+    # Если пользователь уже отвечает на другое сообщение — отменяем старый ответ
     if user_id in reply_sessions:
         old_recipient = reply_sessions[user_id]
 
-        # Определяем нового получателя
         if data == "reply_anon":
             new_recipient = ADMIN_ID
         else:
@@ -388,9 +387,8 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             else:
                 new_recipient = None
 
-        # Если новый получатель отличается от старого
         if new_recipient is not None and new_recipient != old_recipient:
-            # 1. Удаляем сообщение с вопросом
+            # Удаляем сообщение с вопросом
             if 'question_message_id' in context.user_data:
                 try:
                     await context.bot.delete_message(
@@ -400,7 +398,7 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 except Exception as e:
                     print(f"Не удалось удалить сообщение с вопросом: {e}")
 
-            # 2. Восстанавливаем исходное сообщение (на которое отвечали)
+            # Восстанавливаем исходное сообщение
             if 'original_text' in context.user_data:
                 try:
                     original_text = context.user_data.get('original_text', 'Сообщение')
@@ -416,12 +414,8 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 except Exception as e:
                     print(f"Ошибка восстановления: {e}")
 
-            # 3. Удаляем сессию
             del reply_sessions[user_id]
             context.user_data.clear()
-        else:
-            # Если пытается ответить на то же сообщение — просто игнорируем
-            return
 
     # Сохраняем исходное сообщение для восстановления при отмене
     context.user_data['original_text'] = original_message.text
