@@ -14,30 +14,6 @@ logging.basicConfig(level=logging.INFO)
 # Хранилище активных сессий {user_id: {'recipient_id': int, 'recipient_name': str}}
 active_sessions = {}
 
-async def send_referral_link(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
-    """Отправляет пользователю его реферальную ссылку"""
-    bot_username = context.bot.username
-    deep_link = f"https://t.me/{bot_username}?start={user_id}"
-
-    welcome_text = (
-        f"<b>💌 Начните получать анонимные сообщения прямо сейчас!</b>\n\n"
-        f"👉 Твоя ссылка:\n{deep_link}\n\n"
-        f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
-    )
-
-    share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
-    share_keyboard = [
-        [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
-    ]
-    reply_markup = InlineKeyboardMarkup(share_keyboard)
-
-    await update.message.reply_text(
-        welcome_text,
-        reply_markup=reply_markup,
-        parse_mode="HTML",
-        disable_web_page_preview=True
-    )
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
@@ -80,8 +56,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    # Если это обычный /start (без ссылки) — отправляем реферальную ссылку
-    await send_referral_link(update, context, user_id)
+    # Если это обычный /start (без ссылки) — приветствие
+    bot_username = context.bot.username
+    deep_link = f"https://t.me/{bot_username}?start={user_id}"
+
+    welcome_text = (
+        f"<b>💌 Начните получать анонимные сообщения прямо сейчас!</b>\n\n"
+        f"👉 Твоя ссылка:\n{deep_link}\n\n"
+        f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
+    )
+
+    share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
+    share_keyboard = [
+        [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(share_keyboard)
+
+    await update.message.reply_text(
+        welcome_text,
+        reply_markup=reply_markup,
+        parse_mode="HTML",
+        disable_web_page_preview=True
+    )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -117,10 +113,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_video_note(chat_id=recipient_id, video_note=video_note)
         elif update.message.sticker:
             sticker = update.message.sticker.file_id
+            # Сначала уведомление
             await context.bot.send_message(
                 chat_id=recipient_id,
                 text="✉️ Вам пришёл анонимный стикер:"
             )
+            # Потом сам стикер
             await context.bot.send_sticker(
                 chat_id=recipient_id,
                 sticker=sticker
@@ -141,8 +139,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-        # Отправляем отправителю его реферальную ссылку
-        await send_referral_link(update, context, user_id)
+        # Отправляем отправителю его реферальную ссылку (отдельный блок)
+        bot_username = context.bot.username
+        deep_link = f"https://t.me/{bot_username}?start={user_id}"
+
+        welcome_text = (
+            f"<b>💌 Начните получать анонимные сообщения прямо сейчас!</b>\n\n"
+            f"👉 Твоя ссылка:\n{deep_link}\n\n"
+            f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
+        )
+
+        share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
+        share_keyboard = [
+            [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
+        ]
+        share_reply_markup = InlineKeyboardMarkup(share_keyboard)
+
+        await update.message.reply_text(
+            welcome_text,
+            reply_markup=share_reply_markup,
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
 
     except Exception as e:
         await update.message.reply_text("❌ Не удалось отправить сообщение. Возможно, получатель заблокировал бота.")
@@ -152,12 +170,14 @@ async def send_again_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
 
+    # Извлекаем recipient_id и recipient_name из callback_data
     data = query.data.split("_")
     recipient_id = int(data[2])
     recipient_name = data[3]
 
     user_id = query.from_user.id
 
+    # Создаём новую сессию для этого пользователя
     active_sessions[user_id] = {
         'recipient_id': recipient_id,
         'recipient_name': recipient_name
