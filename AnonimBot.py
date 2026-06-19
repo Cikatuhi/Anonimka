@@ -375,6 +375,7 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'original_chat_id': context.user_data.get('original_chat_id')
         }
 
+    # Сохраняем новое исходное сообщение
     context.user_data['original_text'] = original_message.text
     context.user_data['original_chat_id'] = original_message.chat_id
     context.user_data['original_reply_markup'] = original_message.reply_markup
@@ -427,6 +428,7 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
+    # Если был старый ответ — восстанавливаем его ПОСЛЕ открытия нового
     if old_data:
         if old_data.get('question_message_id'):
             try:
