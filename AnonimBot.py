@@ -23,6 +23,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Регистрируем пользователя в БД
     await database.register_user(user_id, username, first_name)
 
+    # Отправляем эмодзи 💌 отдельным сообщением
+    await update.message.reply_text("💌")
+
     # Проверяем, есть ли параметр start (когда перешли по ссылке)
     args = context.args
     if args:
@@ -51,7 +54,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=reply_markup,
                 parse_mode="HTML"
             )
-            return  # ⬅️ Важный return, чтобы не отправлять реферальную ссылку сразу
+            return
 
     # Если это обычный /start (без ссылки) или пришёл после отправки
     bot_username = context.bot.username
@@ -124,8 +127,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Этот тип сообщения пока не поддерживается.")
             return
 
-        # Подтверждение отправителю
-        await update.message.reply_text("<b>✅ Сообщение доставлено!</b>", parse_mode="HTML")
+        # Подтверждение отправителю с кнопкой "Отправить ещё"
+        keyboard = [
+            [InlineKeyboardButton("📨 Отправить ещё одно сообщение", callback_data=f"send_again_{recipient_id}_{recipient_name}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text(
+            "<b>✅ Ваше сообщение доставлено, ожидайте ответа от него</b>",
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
 
         # Отправляем отправителю его реферальную ссылку
         bot_username = context.bot.username
@@ -141,11 +153,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         share_keyboard = [
             [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
         ]
-        reply_markup = InlineKeyboardMarkup(share_keyboard)
+        share_reply_markup = InlineKeyboardMarkup(share_keyboard)
 
         await update.message.reply_text(
             welcome_text,
-            reply_markup=reply_markup,
+            reply_markup=share_reply_markup,
             parse_mode="HTML",
             disable_web_page_preview=True
         )
@@ -153,6 +165,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text("❌ Не удалось отправить сообщение. Возможно, получатель заблокировал бота.")
         print(f"Ошибка отправки: {e}")
+
+async def send_again_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    # Извлекаем recipient_id и recipient_name из callback_data
+    data = query.data.split("_")
+    recipient_id = int(data[2])
+    recipient_name = data[3]
+
+    user_id = query.from_user.id
+
+    # Создаём новую сессию для этого пользователя
+    active_sessions[user_id] = {
+        'recipient_id': recipient_id,
+        'recipient_name': recipient_name
+    }
+
+    keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        f"<b>💌 Отправьте ещё одно анонимное сообщение этому человеку!</b>\n\n"
+        f"<b>✍️ Напишите сюда всё, что хотите ему передать</b>, и {recipient_name} увидит ваше сообщение сразу же, но не будет знать, от кого оно.\n\n"
+        f"Отправить можно: 📝 текст, 🎞 фото или видео, 🔊 кружки и голосовые, а также стикеры ✨",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
 
 async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -179,7 +219,6 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f" ├─ ИНН: 631936284733\n"
         f" └─ ОРГНИП: 325632700083871\n",
         parse_mode="HTML"
-        
     )
 
 def main():
@@ -191,6 +230,7 @@ def main():
     app.add_handler(CommandHandler("info", info_command))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(cancel_handler, pattern="cancel"))
+    app.add_handler(CallbackQueryHandler(send_again_handler, pattern="send_again_"))
 
     print("🤖 Бот запущен и готов к приёму анонимных сообщений...")
     app.run_polling()
