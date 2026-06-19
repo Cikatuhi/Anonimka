@@ -248,10 +248,22 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
-    # Пока просто показываем уведомление
+
+    # Текст сообщения
+    text = (
+        f"💌 <b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
+    )
+
+    # Кнопка со ссылкой (место для ссылки)
+    keyboard = [
+        [InlineKeyboardButton("👀 Узнать отправителя", url="https://ваш-сайт.ру")]  # ← Сюда вставьте ссылку
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Отправляем новое сообщение вместо старого
     await query.edit_message_text(
-        text=query.message.text + "\n\n🔧 Функция \"Узнать кто это\" будет доступна позже!",
+        text=text,
+        reply_markup=reply_markup,
         parse_mode="HTML"
     )
 
