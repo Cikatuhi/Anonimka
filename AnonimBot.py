@@ -366,16 +366,39 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     original_message = query.message
 
-    old_data = None
+    # Если был старый ответ — сначала восстанавливаем его
     if user_id in reply_sessions:
-        old_data = {
-            'question_message_id': context.user_data.get('question_message_id'),
-            'original_text': context.user_data.get('original_text'),
-            'original_reply_markup': context.user_data.get('original_reply_markup'),
-            'original_chat_id': context.user_data.get('original_chat_id')
-        }
+        # Удаляем сообщение с вопросом
+        if 'question_message_id' in context.user_data:
+            try:
+                await context.bot.delete_message(
+                    chat_id=user_id,
+                    message_id=context.user_data['question_message_id']
+                )
+            except Exception as e:
+                print(f"Не удалось удалить сообщение с вопросом: {e}")
 
-    # Сохраняем новое исходное сообщение
+        # Восстанавливаем исходное сообщение
+        if 'original_text' in context.user_data:
+            try:
+                original_text = context.user_data.get('original_text', 'Сообщение')
+                original_reply_markup = context.user_data.get('original_reply_markup')
+                original_chat_id = context.user_data.get('original_chat_id', user_id)
+
+                await context.bot.send_message(
+                    chat_id=original_chat_id,
+                    text=original_text,
+                    reply_markup=original_reply_markup,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                print(f"Ошибка восстановления: {e}")
+
+        # Удаляем сессию и очищаем данные
+        del reply_sessions[user_id]
+        context.user_data.clear()
+
+    # Теперь открываем ответ на НОВОЕ сообщение
     context.user_data['original_text'] = original_message.text
     context.user_data['original_chat_id'] = original_message.chat_id
     context.user_data['original_reply_markup'] = original_message.reply_markup
@@ -392,7 +415,9 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode="HTML"
         )
         context.user_data['question_message_id'] = msg.message_id
-    elif data.startswith("reply_"):
+        return
+
+    if data.startswith("reply_"):
         parts = data.split("_")
         if len(parts) >= 2:
             try:
@@ -409,46 +434,14 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     parse_mode="HTML"
                 )
                 context.user_data['question_message_id'] = msg.message_id
-            except ValueError:
-                await query.edit_message_text(
-                    text="❌ Не удалось обработать запрос.",
-                    parse_mode="HTML"
-                )
                 return
-        else:
-            await query.edit_message_text(
-                text="❌ Не удалось обработать запрос.",
-                parse_mode="HTML"
-            )
-            return
-    else:
-        await query.edit_message_text(
-            text="❌ Не удалось обработать запрос.",
-            parse_mode="HTML"
-        )
-        return
+            except ValueError:
+                pass
 
-    # Если был старый ответ — восстанавливаем его ПОСЛЕ открытия нового
-    if old_data:
-        if old_data.get('question_message_id'):
-            try:
-                await context.bot.delete_message(
-                    chat_id=user_id,
-                    message_id=old_data['question_message_id']
-                )
-            except Exception as e:
-                print(f"Не удалось удалить сообщение с вопросом: {e}")
-
-        if old_data.get('original_text'):
-            try:
-                await context.bot.send_message(
-                    chat_id=old_data['original_chat_id'],
-                    text=old_data['original_text'],
-                    reply_markup=old_data['original_reply_markup'],
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                print(f"Ошибка восстановления старого сообщения: {e}")
+    await query.edit_message_text(
+        text="❌ Не удалось обработать запрос.",
+        parse_mode="HTML"
+    )
 
 async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
