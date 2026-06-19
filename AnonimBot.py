@@ -8,12 +8,14 @@ import database
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 7683869901
 
 logging.basicConfig(level=logging.INFO)
 
 active_sessions = {}
 reply_sessions = {}
+
+# ID администратора для пересылки ответов на рассылку
+ADMIN_ID = 7683869901
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -186,7 +188,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(reply_keyboard)
 
-        # --- СОХРАНЯЕМ СООБЩЕНИЕ В БД ---
         content = "медиа-файл"
         content_type = "text"
 
@@ -254,7 +255,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Этот тип сообщения пока не поддерживается.")
             return
 
-        # Сохраняем сообщение в базу данных
         await database.save_message(user_id, recipient_id, content, content_type)
 
         keyboard = [
@@ -326,19 +326,38 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = query.from_user.id
 
-    # Если пользователь был в режиме ответа — просто выходим, не удаляя сообщение
     if user_id in reply_sessions:
         del reply_sessions[user_id]
+        
+        if 'original_message_id' in context.user_data:
+            try:
+                chat_id = context.user_data.get('original_chat_id')
+                message_id = context.user_data.get('original_message_id')
+                original_text = context.user_data.get('original_text', 'Сообщение')
+                original_reply_markup = context.user_data.get('original_reply_markup')
+                
+                await query.delete_message()
+                
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=original_text,
+                    reply_markup=original_reply_markup,
+                    parse_mode="HTML"
+                )
+                
+                context.user_data.clear()
+                return
+            except Exception as e:
+                print(f"Ошибка восстановления сообщения: {e}")
+        
         await query.edit_message_text("❌ Отправка ответа отменена.")
         return
 
-    # Если пользователь был в режиме отправки нового сообщения — возвращаемся
     if user_id in active_sessions:
         del active_sessions[user_id]
         await query.edit_message_text("❌ Отправка отменена.")
         return
 
-    # Если ничего не нашли — просто говорим, что отменено
     await query.edit_message_text("❌ Отправка отменена.")
 
 async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -348,12 +367,18 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     data = query.data
     user_id = query.from_user.id
 
-    # Если это кнопка "Ответить" из рассылки (без ID)
+    original_message = query.message
+
     if data == "reply_anon":
-        # Отправляем ответ администратору
         reply_sessions[user_id] = ADMIN_ID
         keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        context.user_data['original_message_id'] = original_message.message_id
+        context.user_data['original_chat_id'] = original_message.chat_id
+        context.user_data['original_text'] = original_message.text
+        context.user_data['original_reply_markup'] = original_message.reply_markup
+        
         await query.edit_message_text(
             f"<b>✍️ Напишите ваш ответ администратору</b>\n\n"
             f"Ваше сообщение будет отправлено анонимно.",
@@ -362,7 +387,6 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    # Обычный ответ на анонимное сообщение (с ID)
     if data.startswith("reply_"):
         parts = data.split("_")
         if len(parts) >= 2:
@@ -383,7 +407,6 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except ValueError:
                 pass
 
-    # Если что-то пошло не так
     await query.edit_message_text(
         text="❌ Не удалось обработать запрос.",
         parse_mode="HTML"
