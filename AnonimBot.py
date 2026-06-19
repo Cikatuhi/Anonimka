@@ -145,13 +145,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text("✅ Ваш ответ отправлен анонимно!")
 
-            # Восстанавливаем исходное сообщение (с кнопками)
-            if 'original_text' in context.user_data:
+            # Восстанавливаем исходное сообщение (редактируем, а не отправляем новое)
+            if 'original_text' in context.user_data and 'question_message_id' in context.user_data:
                 try:
                     original_text = context.user_data.get('original_text', 'Сообщение')
                     original_reply_markup = context.user_data.get('original_reply_markup')
                     original_chat_id = context.user_data.get('original_chat_id', user_id)
+                    question_message_id = context.user_data.get('question_message_id')
 
+                    # Удаляем сообщение с вопросом
+                    await context.bot.delete_message(
+                        chat_id=user_id,
+                        message_id=question_message_id
+                    )
+
+                    # Отправляем исходное сообщение заново (оно будет на том же месте)
                     await context.bot.send_message(
                         chat_id=original_chat_id,
                         text=original_text,
@@ -344,6 +352,17 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in reply_sessions:
         del reply_sessions[user_id]
 
+        # Удаляем сообщение с вопросом
+        if 'question_message_id' in context.user_data:
+            try:
+                await context.bot.delete_message(
+                    chat_id=user_id,
+                    message_id=context.user_data['question_message_id']
+                )
+            except Exception as e:
+                print(f"Не удалось удалить сообщение с вопросом: {e}")
+
+        # Восстанавливаем исходное сообщение
         if 'original_text' in context.user_data:
             try:
                 original_text = context.user_data.get('original_text', 'Сообщение')
@@ -358,11 +377,6 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as e:
                 print(f"Ошибка восстановления: {e}")
-        
-        try:
-            await query.delete_message()
-        except Exception as e:
-            print(f"Не удалось удалить сообщение: {e}")
         
         context.user_data.clear()
         return
@@ -382,7 +396,6 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     original_message = query.message
 
-    # Если был старый ответ — сначала восстанавливаем его
     if user_id in reply_sessions:
         if 'question_message_id' in context.user_data:
             try:
