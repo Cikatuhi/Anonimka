@@ -249,19 +249,21 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # Текст сообщения
+    # Текст нового сообщения
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
+        f"👀 Нажмите на кнопку ниже, чтобы узнать отправителя."
     )
 
     # Кнопка со ссылкой (место для ссылки)
     keyboard = [
-        [InlineKeyboardButton("👀 Узнать отправителя", url="https://ваш-сайт.ру")]  # ← Сюда вставьте ссылку
+        [InlineKeyboardButton("👀 Узнать отправителя", url="https://ваш-сайт.ру")]  # ← Вставьте свою ссылку
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Отправляем новое сообщение вместо старого
-    await query.edit_message_text(
+    # Отправляем новое сообщение
+    await context.bot.send_message(
+        chat_id=query.from_user.id,
         text=text,
         reply_markup=reply_markup,
         parse_mode="HTML"
