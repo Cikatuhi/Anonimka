@@ -8,7 +8,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI(title="Admin Panel для Telegram Бота")
-templates = Jinja2Templates(directory="templates")
+
+templates = Jinja2Templates(
+    directory="templates",
+    autoescape=True,
+    auto_reload=True
+)
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
@@ -26,9 +31,8 @@ async def dashboard(request: Request):
     conn = await get_db()
     try:
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
-        # Передаём данные как простые переменные
         return templates.TemplateResponse(
-            "dashboard.html", 
+            "dashboard.html",
             {
                 "request": request,
                 "total_users": total_users or 0
@@ -42,7 +46,6 @@ async def users_page(request: Request):
     conn = await get_db()
     try:
         users = await conn.fetch("SELECT * FROM users ORDER BY registered_at DESC LIMIT 100")
-        # Преобразуем записи в словари для безопасной передачи в шаблон
         users_list = [dict(user) for user in users]
         return templates.TemplateResponse(
             "users.html",
