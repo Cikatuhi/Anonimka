@@ -27,13 +27,13 @@ async def table_exists(conn, table_name):
     return result
 
 MENU = '''
-<div style="background: #2c3e50; padding: 15px; margin-bottom: 20px; border-radius: 8px;">
-    <a href="/" style="color: white; text-decoration: none; margin: 0 15px; font-weight: bold;">📊 Дашборд</a>
-    <a href="/users" style="color: white; text-decoration: none; margin: 0 15px;">👥 Пользователи</a>
-    <a href="/messages" style="color: white; text-decoration: none; margin: 0 15px;">💬 Сообщения</a>
-    <a href="/withdrawals" style="color: white; text-decoration: none; margin: 0 15px;">💰 Система снятий</a>
-    <a href="/settings" style="color: white; text-decoration: none; margin: 0 15px;">⚙️ Настройки</a>
-    <a href="/broadcast" style="color: white; text-decoration: none; margin: 0 15px;">📢 Рассылка</a>
+<div style="background: white; padding: 15px 30px; border-bottom: 2px solid #e8ecf1; display: flex; gap: 30px; align-items: center;">
+    <a href="/" style="color: #2c3e50; text-decoration: none; font-weight: 600; font-size: 16px; padding: 8px 16px; border-radius: 8px;">📊 Дашборд</a>
+    <a href="/users" style="color: #7f8c8d; text-decoration: none; font-weight: 500; font-size: 16px; padding: 8px 16px; border-radius: 8px;">👥 Пользователи</a>
+    <a href="/messages" style="color: #7f8c8d; text-decoration: none; font-weight: 500; font-size: 16px; padding: 8px 16px; border-radius: 8px;">💬 Сообщения</a>
+    <a href="/withdrawals" style="color: #7f8c8d; text-decoration: none; font-weight: 500; font-size: 16px; padding: 8px 16px; border-radius: 8px;">💰 Система снятий</a>
+    <a href="/settings" style="color: #7f8c8d; text-decoration: none; font-weight: 500; font-size: 16px; padding: 8px 16px; border-radius: 8px;">⚙️ Настройки</a>
+    <a href="/broadcast" style="color: #7f8c8d; text-decoration: none; font-weight: 500; font-size: 16px; padding: 8px 16px; border-radius: 8px;">📢 Рассылка</a>
 </div>
 '''
 
@@ -43,40 +43,65 @@ BASE_HTML = '''
 <head>
     <title>Админ панель</title>
     <style>
-        body { font-family: Arial, sans-serif; padding: 20px; margin: 0; background: #f4f6f9; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .stats { display: flex; gap: 20px; flex-wrap: wrap; }
-        .stat-card { background: white; padding: 20px; border-radius: 10px; flex: 1; min-width: 150px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); text-align: center; }
-        .stat-number { font-size: 32px; font-weight: bold; color: #007bff; }
-        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-        th { background: #007bff; color: white; }
-        tr:nth-child(even) { background: #f9f9f9; }
-        .badge {
-            display: inline-block;
-            padding: 3px 10px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: bold;
-            color: white;
-        }
-        .badge-text { background: #28a745; }
-        .badge-photo { background: #17a2b8; }
-        .badge-video { background: #dc3545; }
-        .badge-voice { background: #ffc107; color: #333; }
-        .badge-sticker { background: #6f42c1; }
-        .badge-video_note { background: #fd7e14; }
-        .menu a:hover { color: #f39c12; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; color: #2c3e50; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px 30px; }
+        
+        /* Меню */
+        .menu { background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 0 20px; margin-bottom: 25px; }
+        .menu a { display: inline-block; padding: 16px 20px; color: #7f8c8d; text-decoration: none; font-weight: 500; font-size: 15px; border-bottom: 3px solid transparent; transition: all 0.2s; }
+        .menu a:hover { color: #2c3e50; border-bottom-color: #3498db; }
+        .menu a.active { color: #2c3e50; border-bottom-color: #3498db; font-weight: 600; }
+        
+        /* Заголовок */
+        .page-title { font-size: 24px; font-weight: 700; margin-bottom: 25px; color: #2c3e50; }
+        
+        /* Карточки статистики */
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .stat-card { background: white; padding: 25px 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); text-align: center; transition: transform 0.2s; }
+        .stat-card:hover { transform: translateY(-4px); }
+        .stat-number { font-size: 32px; font-weight: 700; color: #2c3e50; }
+        .stat-label { font-size: 14px; color: #7f8c8d; margin-top: 5px; }
+        .stat-card .icon { font-size: 28px; margin-bottom: 8px; display: block; }
+        
+        /* Таблицы */
+        .table-container { background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f8f9fa; color: #2c3e50; font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; padding: 14px 16px; text-align: left; }
+        td { padding: 12px 16px; border-bottom: 1px solid #f0f2f5; font-size: 14px; }
+        tr:hover { background: #f8f9fa; }
+        
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .badge-text { background: #e8f5e9; color: #2e7d32; }
+        .badge-photo { background: #e3f2fd; color: #0d47a1; }
+        .badge-video { background: #fbe9e7; color: #bf360c; }
+        .badge-voice { background: #fff8e1; color: #f57f17; }
+        .badge-sticker { background: #f3e5f5; color: #6a1b9a; }
+        .badge-video_note { background: #fff3e0; color: #e65100; }
+        
+        .empty { text-align: center; padding: 40px; color: #95a5a6; font-size: 16px; }
+        .mt-20 { margin-top: 20px; }
     </style>
 </head>
 <body>
     <div class="container">
-        MENU_PLACEHOLDER
+        <div class="menu">MENU_PLACEHOLDER</div>
         CONTENT_PLACEHOLDER
     </div>
 </body>
 </html>
 '''
+
+def get_badge_class(content_type):
+    types = {
+        'text': 'text',
+        'photo': 'photo',
+        'video': 'video',
+        'voice': 'voice',
+        'sticker': 'sticker',
+        'video_note': 'video_note'
+    }
+    return types.get(content_type, 'text')
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
@@ -84,19 +109,37 @@ async def dashboard():
     try:
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
         total_messages = await conn.fetchval("SELECT COUNT(*) FROM messages") if await table_exists(conn, "messages") else 0
-        total_withdrawals = 0
         total_premium = 0
+        total_payments = 0
+        total_revenue = "0"
 
         content = f'''
-        <h1>📊 Дашборд</h1>
+        <div class="page-title">📊 Дашборд</div>
         <div class="stats">
-            <div class="stat-card"><h3>Всего пользователей</h3><div class="stat-number">{total_users}</div></div>
-            <div class="stat-card"><h3>💬 Сообщений</h3><div class="stat-number">{total_messages}</div></div>
-            <div class="stat-card"><h3>💰 Снятий</h3><div class="stat-number">{total_withdrawals}</div></div>
-            <div class="stat-card"><h3>⭐ Премиум</h3><div class="stat-number">{total_premium}</div></div>
+            <div class="stat-card">
+                <span class="icon">👥</span>
+                <div class="stat-number">{total_users}</div>
+                <div class="stat-label">Пользователи</div>
+            </div>
+            <div class="stat-card">
+                <span class="icon">⭐</span>
+                <div class="stat-number">{total_premium}</div>
+                <div class="stat-label">Премиум</div>
+            </div>
+            <div class="stat-card">
+                <span class="icon">💬</span>
+                <div class="stat-number">{total_messages}</div>
+                <div class="stat-label">Сообщений</div>
+            </div>
+            <div class="stat-card">
+                <span class="icon">💳</span>
+                <div class="stat-number">{total_payments}</div>
+                <div class="stat-label">Платежей ({total_revenue} ₽)</div>
+            </div>
         </div>
         '''
-        return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', MENU).replace('CONTENT_PLACEHOLDER', content))
+        menu = MENU.replace('📊 Дашборд', '<span style="color:#2c3e50;">📊 Дашборд</span>')
+        return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', content))
     finally:
         await conn.close()
 
@@ -105,11 +148,23 @@ async def users_page():
     conn = await get_db()
     try:
         rows = await conn.fetch("SELECT * FROM users ORDER BY registered_at DESC LIMIT 100")
-        html = '<h1>👥 Пользователи</h1><table><tr><th>ID</th><th>Username</th><th>Имя</th><th>Зарегистрирован</th></tr>'
-        for row in rows:
-            html += f"<tr><td>{row['telegram_id']}</td><td>{row.get('username') or '-'}</td><td>{row.get('first_name') or '-'}</td><td>{row.get('registered_at') or '-'}</td></tr>"
-        html += '</table>'
-        return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', MENU).replace('CONTENT_PLACEHOLDER', html))
+        total = len(rows)
+        
+        html = f'<div class="page-title">👥 Пользователи</div>'
+        html += f'<div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">'
+        html += f'<div class="stat-card"><div class="stat-number">{total}</div><div class="stat-label">Всего пользователей</div></div>'
+        html += f'</div>'
+        
+        if rows:
+            html += '<div class="table-container"><table><tr><th>ID</th><th>Username</th><th>Имя</th><th>Зарегистрирован</th></tr>'
+            for row in rows:
+                html += f"<tr><td>{row['telegram_id']}</td><td>{row.get('username') or '-'}</td><td>{row.get('first_name') or '-'}</td><td>{row.get('registered_at').strftime('%d.%m.%Y %H:%M') if row.get('registered_at') else '-'}</td></tr>"
+            html += '</table></div>'
+        else:
+            html += '<div class="empty">😕 Пользователей пока нет</div>'
+            
+        menu = MENU.replace('👥 Пользователи', '<span style="color:#2c3e50;">👥 Пользователи</span>')
+        return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
     finally:
         await conn.close()
 
@@ -134,66 +189,49 @@ async def messages_page():
             LIMIT 100
         """)
 
-        html = '<h1>💬 Сообщения</h1>'
-        if not rows:
-            html += '<p>Сообщений пока нет.</p>'
-        else:
-            html += '''
-            <table>
-                <tr>
-                    <th>ID</th>
-                    <th>От кого</th>
-                    <th>Кому</th>
-                    <th>Тип</th>
-                    <th>Сообщение</th>
-                    <th>Дата</th>
-                </tr>
-            '''
+        html = '<div class="page-title">💬 Сообщения</div>'
+        if rows:
+            html += '<div class="table-container"><table><tr><th>ID</th><th>От кого</th><th>Кому</th><th>Тип</th><th>Сообщение</th><th>Дата</th></tr>'
             for row in rows:
                 sender = row.get('sender_username') or row.get('sender_name') or 'Неизвестно'
                 recipient = row.get('recipient_username') or row.get('recipient_name') or 'Неизвестно'
-                
-                badge_class = "badge-text"
-                if row['content_type'] == 'photo':
-                    badge_class = "badge-photo"
-                elif row['content_type'] == 'video':
-                    badge_class = "badge-video"
-                elif row['content_type'] == 'voice':
-                    badge_class = "badge-voice"
-                elif row['content_type'] == 'sticker':
-                    badge_class = "badge-sticker"
-                elif row['content_type'] == 'video_note':
-                    badge_class = "badge-video_note"
-                
+                badge_class = get_badge_class(row['content_type'])
                 html += f'''
                 <tr>
                     <td>{row['id']}</td>
                     <td>@{sender}</td>
                     <td>@{recipient}</td>
-                    <td><span class="badge {badge_class}">{row['content_type']}</span></td>
-                    <td>{row['content'][:100]}{'...' if len(row['content'] or '') > 100 else ''}</td>
+                    <td><span class="badge badge-{badge_class}">{row['content_type']}</span></td>
+                    <td>{row['content'][:80]}{'...' if len(row['content'] or '') > 80 else ''}</td>
                     <td>{row['created_at'].strftime('%d.%m.%Y %H:%M') if row['created_at'] else '-'}</td>
                 </tr>
                 '''
-            html += '</table>'
-        return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', MENU).replace('CONTENT_PLACEHOLDER', html))
+            html += '</table></div>'
+        else:
+            html += '<div class="empty">😕 Сообщений пока нет</div>'
+            
+        menu = MENU.replace('💬 Сообщения', '<span style="color:#2c3e50;">💬 Сообщения</span>')
+        return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
     finally:
         await conn.close()
 
 @app.get("/withdrawals", response_class=HTMLResponse)
 async def withdrawals_page():
-    content = '<h1>💰 Система снятий</h1><p>Здесь будет список заявок на вывод.</p>'
-    return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', MENU).replace('CONTENT_PLACEHOLDER', content))
+    html = '<div class="page-title">💰 Система снятий</div><div class="empty">🔧 Раздел в разработке</div>'
+    menu = MENU.replace('💰 Система снятий', '<span style="color:#2c3e50;">💰 Система снятий</span>')
+    return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page():
-    content = '<h1>⚙️ Настройки</h1><p>Здесь будут настройки бота.</p>'
-    return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', MENU).replace('CONTENT_PLACEHOLDER', content))
+    html = '<div class="page-title">⚙️ Настройки</div><div class="empty">🔧 Раздел в разработке</div>'
+    menu = MENU.replace('⚙️ Настройки', '<span style="color:#2c3e50;">⚙️ Настройки</span>')
+    return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 @app.get("/broadcast", response_class=HTMLResponse)
 async def broadcast_page():
-    content = '<h1>📢 Рассылка</h1><p>Здесь будет форма для рассылки.</p>'
-    return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', MENU).replace('CONTENT_PLACEHOLDER', content))
+    html = '<div class="page-title">📢 Рассылка</div><div class="empty">🔧 Раздел в разработке</div>'
+    menu = MENU.replace('📢 Рассылка', '<span style="color:#2c3e50;">📢 Рассылка</span>')
+    return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 if __name__ == "__main__":
     import uvicorn
