@@ -66,7 +66,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
     )
 
-    share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
     share_keyboard = [
         [InlineKeyboardButton("📤 Поделиться ссылкой", switch_inline_query=f"Отправь мне анонимное сообщение, по этой ссылке 👉 {deep_link}")]
     ]
@@ -93,24 +92,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recipient_name = session['recipient_name']
 
     try:
+        # Создаём кнопку "Ответить анонимно"
+        reply_keyboard = [[InlineKeyboardButton("🔒 Ответить анонимно", callback_data="reply_anon")]]
+        reply_markup = InlineKeyboardMarkup(reply_keyboard)
+
         # Отправляем сообщение получателю (анонимно)
         if update.message.text:
             content = update.message.text
-            await context.bot.send_message(chat_id=recipient_id, text=f"✉️ Вам пришло анонимное сообщение:\n\n{content}")
+            await context.bot.send_message(
+                chat_id=recipient_id,
+                text=f"✉️ Вам пришло анонимное сообщение:\n\n{content}",
+                reply_markup=reply_markup
+            )
         elif update.message.photo:
             photo = update.message.photo[-1].file_id
             caption = update.message.caption or ""
-            await context.bot.send_photo(chat_id=recipient_id, photo=photo, caption=f"✉️ Вам пришло анонимное фото:\n\n{caption}")
+            await context.bot.send_photo(
+                chat_id=recipient_id,
+                photo=photo,
+                caption=f"✉️ Вам пришло анонимное фото:\n\n{caption}",
+                reply_markup=reply_markup
+            )
         elif update.message.video:
             video = update.message.video.file_id
             caption = update.message.caption or ""
-            await context.bot.send_video(chat_id=recipient_id, video=video, caption=f"✉️ Вам пришло анонимное видео:\n\n{caption}")
+            await context.bot.send_video(
+                chat_id=recipient_id,
+                video=video,
+                caption=f"✉️ Вам пришло анонимное видео:\n\n{caption}",
+                reply_markup=reply_markup
+            )
         elif update.message.voice:
             voice = update.message.voice.file_id
-            await context.bot.send_voice(chat_id=recipient_id, voice=voice, caption="✉️ Вам пришло анонимное голосовое сообщение")
+            await context.bot.send_voice(
+                chat_id=recipient_id,
+                voice=voice,
+                caption="✉️ Вам пришло анонимное голосовое сообщение",
+                reply_markup=reply_markup
+            )
         elif update.message.video_note:
             video_note = update.message.video_note.file_id
-            await context.bot.send_video_note(chat_id=recipient_id, video_note=video_note)
+            await context.bot.send_video_note(
+                chat_id=recipient_id,
+                video_note=video_note,
+                reply_markup=reply_markup
+            )
         elif update.message.sticker:
             sticker = update.message.sticker.file_id
             # Сначала уведомление
@@ -118,10 +144,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=recipient_id,
                 text="✉️ Вам пришёл анонимный стикер:"
             )
-            # Потом сам стикер
+            # Потом сам стикер с кнопкой
             await context.bot.send_sticker(
                 chat_id=recipient_id,
-                sticker=sticker
+                sticker=sticker,
+                reply_markup=reply_markup
             )
         else:
             await update.message.reply_text("⚠️ Этот тип сообщения пока не поддерживается.")
@@ -139,7 +166,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-        # Отправляем отправителю его реферальную ссылку (отдельный блок)
+        # Отправляем отправителю его реферальную ссылку
         bot_username = context.bot.username
         deep_link = f"https://t.me/{bot_username}?start={user_id}"
 
@@ -149,7 +176,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
         )
 
-        share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
         share_keyboard = [
             [InlineKeyboardButton("📤 Поделиться ссылкой", switch_inline_query=f"Отправь мне анонимное сообщение, по этой ссылке 👉 {deep_link}")]
         ]
@@ -204,6 +230,16 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text("❌ Отправка отменена.")
 
+async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    # Пока просто показываем уведомление
+    await query.edit_message_text(
+        text=query.message.text + "\n\n🔧 Функция ответа будет доступна позже!",
+        parse_mode="HTML"
+    )
+
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🌟 ℹ️ <b>Информация</b> 🌟\n\n"
@@ -231,6 +267,7 @@ def main():
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(cancel_handler, pattern="cancel"))
     app.add_handler(CallbackQueryHandler(send_again_handler, pattern="send_again_"))
+    app.add_handler(CallbackQueryHandler(reply_anon_handler, pattern="reply_anon"))
 
     print("🤖 Бот запущен и готов к приёму анонимных сообщений...")
     app.run_polling()
