@@ -325,11 +325,20 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     user_id = query.from_user.id
-    if user_id in active_sessions:
-        del active_sessions[user_id]
+
+    # Если пользователь был в режиме ответа — просто выходим, не удаляя сообщение
     if user_id in reply_sessions:
         del reply_sessions[user_id]
+        await query.edit_message_text("❌ Отправка ответа отменена.")
+        return
 
+    # Если пользователь был в режиме отправки нового сообщения — возвращаемся
+    if user_id in active_sessions:
+        del active_sessions[user_id]
+        await query.edit_message_text("❌ Отправка отменена.")
+        return
+
+    # Если ничего не нашли — просто говорим, что отменено
     await query.edit_message_text("❌ Отправка отменена.")
 
 async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
