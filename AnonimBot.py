@@ -96,7 +96,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Создаём две кнопки в столбец
         reply_keyboard = [
             [InlineKeyboardButton("✍️ Ответить", callback_data="reply_anon")],
-            [InlineKeyboardButton("👀 Узнать кто это", callback_data="who_is_it", style="primary", custom_emoji_id="5424885441100782420")]
+            [InlineKeyboardButton("👀 Узнать кто это", callback_data="who_is_it", style="primary")]
         ]
         reply_markup = InlineKeyboardMarkup(reply_keyboard)
 
