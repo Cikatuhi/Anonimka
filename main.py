@@ -8,12 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI(title="Admin Panel для Telegram Бота")
-
-templates = Jinja2Templates(
-    directory="templates",
-    autoescape=True,
-    auto_reload=True
-)
+templates = Jinja2Templates(directory="templates")
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
