@@ -181,8 +181,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recipient_name = session['recipient_name']
 
     try:
-        # Формируем кнопки для получателя
-        # Если пользователь уже отвечает кому-то — убираем кнопку "Ответить"
         if user_id in reply_sessions:
             reply_keyboard = [
                 [InlineKeyboardButton("👀 Узнать кто это", callback_data="who_is_it", style="primary")]
@@ -335,6 +333,17 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in reply_sessions:
         del reply_sessions[user_id]
 
+        # Удаляем сообщение с вопросом
+        if 'question_message_id' in context.user_data:
+            try:
+                await context.bot.delete_message(
+                    chat_id=user_id,
+                    message_id=context.user_data['question_message_id']
+                )
+            except Exception as e:
+                print(f"Не удалось удалить сообщение с вопросом: {e}")
+
+        # Восстанавливаем исходное сообщение
         if 'original_text' in context.user_data:
             try:
                 original_text = context.user_data.get('original_text', 'Сообщение')
@@ -349,12 +358,12 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as e:
                 print(f"Ошибка восстановления: {e}")
-        
+
         try:
             await query.delete_message()
         except Exception as e:
             print(f"Не удалось удалить сообщение: {e}")
-        
+
         context.user_data.clear()
         return
 
@@ -373,17 +382,56 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     original_message = query.message
 
-    # Если пользователь уже отвечает — не даём начать новый ответ
+    # Если пользователь уже отвечает — закрываем старый ответ
     if user_id in reply_sessions:
-        await query.answer("⚠️ Вы уже отвечаете на другое сообщение! Сначала завершите ответ.", show_alert=True)
-        return
+        old_recipient = reply_sessions[user_id]
 
-    # Проверяем, есть ли уже активный ответ на это же сообщение
-    # (защита от двойного нажатия)
-    if 'question_message_id' in context.user_data:
-        await query.answer("⏳ Подождите, ответ уже открывается...", show_alert=True)
-        return
+        # Определяем нового получателя
+        if data == "reply_anon":
+            new_recipient = ADMIN_ID
+        else:
+            parts = data.split("_")
+            if len(parts) >= 2:
+                try:
+                    new_recipient = int(parts[1])
+                except ValueError:
+                    new_recipient = None
+            else:
+                new_recipient = None
 
+        # Если новый получатель отличается от старого — отменяем старый ответ
+        if new_recipient is not None and new_recipient != old_recipient:
+            # Удаляем старое сообщение с вопросом
+            if 'question_message_id' in context.user_data:
+                try:
+                    await context.bot.delete_message(
+                        chat_id=user_id,
+                        message_id=context.user_data['question_message_id']
+                    )
+                except Exception as e:
+                    print(f"Не удалось удалить сообщение с вопросом: {e}")
+
+            # Восстанавливаем исходное сообщение (то, на которое отвечали первым)
+            if 'original_text' in context.user_data:
+                try:
+                    original_text = context.user_data.get('original_text', 'Сообщение')
+                    original_reply_markup = context.user_data.get('original_reply_markup')
+                    original_chat_id = context.user_data.get('original_chat_id', user_id)
+
+                    await context.bot.send_message(
+                        chat_id=original_chat_id,
+                        text=original_text,
+                        reply_markup=original_reply_markup,
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    print(f"Ошибка восстановления исходного сообщения: {e}")
+
+            # Удаляем сессию
+            del reply_sessions[user_id]
+            context.user_data.clear()
+
+    # Сохраняем новое оригинальное сообщение
     context.user_data['original_text'] = original_message.text
     context.user_data['original_chat_id'] = original_message.chat_id
     context.user_data['original_reply_markup'] = original_message.reply_markup
