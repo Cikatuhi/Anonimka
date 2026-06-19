@@ -181,15 +181,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recipient_name = session['recipient_name']
 
     try:
-        if user_id in reply_sessions:
-            reply_keyboard = [
-                [InlineKeyboardButton("👀 Узнать кто это", callback_data="who_is_it", style="primary")]
-            ]
-        else:
-            reply_keyboard = [
-                [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
-                [InlineKeyboardButton("👀 Узнать кто это", callback_data="who_is_it", style="primary")]
-            ]
+        reply_keyboard = [
+            [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
+            [InlineKeyboardButton("👀 Узнать кто это", callback_data="who_is_it", style="primary")]
+        ]
         reply_markup = InlineKeyboardMarkup(reply_keyboard)
 
         content = "медиа-файл"
@@ -371,7 +366,7 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     original_message = query.message
 
-    # Если пользователь уже отвечает на другое сообщение — отменяем старый ответ
+    # Если уже есть активный ответ — отменяем его
     if user_id in reply_sessions:
         old_recipient = reply_sessions[user_id]
 
@@ -417,7 +412,7 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             del reply_sessions[user_id]
             context.user_data.clear()
 
-    # Сохраняем исходное сообщение для восстановления при отмене
+    # Сохраняем новое исходное сообщение
     context.user_data['original_text'] = original_message.text
     context.user_data['original_chat_id'] = original_message.chat_id
     context.user_data['original_reply_markup'] = original_message.reply_markup
