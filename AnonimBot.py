@@ -343,21 +343,18 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 print(f"Не удалось удалить сообщение с вопросом: {e}")
 
-        # Восстанавливаем исходное сообщение
-        if 'original_text' in context.user_data:
-            try:
-                original_text = context.user_data.get('original_text', 'Сообщение')
-                original_reply_markup = context.user_data.get('original_reply_markup')
-                original_chat_id = context.user_data.get('original_chat_id', user_id)
-
-                await context.bot.send_message(
-                    chat_id=original_chat_id,
-                    text=original_text,
-                    reply_markup=original_reply_markup,
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                print(f"Ошибка восстановления: {e}")
+        # Восстанавливаем ВСЕ исходные сообщения из списка
+        if 'original_messages' in context.user_data:
+            for msg_data in context.user_data['original_messages']:
+                try:
+                    await context.bot.send_message(
+                        chat_id=msg_data['chat_id'],
+                        text=msg_data['text'],
+                        reply_markup=msg_data['reply_markup'],
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    print(f"Ошибка восстановления сообщения: {e}")
 
         try:
             await query.delete_message()
@@ -386,7 +383,6 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if user_id in reply_sessions:
         old_recipient = reply_sessions[user_id]
 
-        # Определяем нового получателя
         if data == "reply_anon":
             new_recipient = ADMIN_ID
         else:
@@ -399,9 +395,8 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             else:
                 new_recipient = None
 
-        # Если новый получатель отличается от старого — отменяем старый ответ
         if new_recipient is not None and new_recipient != old_recipient:
-            # Удаляем старое сообщение с вопросом
+            # Удаляем сообщение с вопросом
             if 'question_message_id' in context.user_data:
                 try:
                     await context.bot.delete_message(
@@ -411,30 +406,31 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 except Exception as e:
                     print(f"Не удалось удалить сообщение с вопросом: {e}")
 
-            # Восстанавливаем исходное сообщение (то, на которое отвечали первым)
-            if 'original_text' in context.user_data:
-                try:
-                    original_text = context.user_data.get('original_text', 'Сообщение')
-                    original_reply_markup = context.user_data.get('original_reply_markup')
-                    original_chat_id = context.user_data.get('original_chat_id', user_id)
+            # Восстанавливаем ВСЕ исходные сообщения из списка
+            if 'original_messages' in context.user_data:
+                for msg_data in context.user_data['original_messages']:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=msg_data['chat_id'],
+                            text=msg_data['text'],
+                            reply_markup=msg_data['reply_markup'],
+                            parse_mode="HTML"
+                        )
+                    except Exception as e:
+                        print(f"Ошибка восстановления сообщения: {e}")
 
-                    await context.bot.send_message(
-                        chat_id=original_chat_id,
-                        text=original_text,
-                        reply_markup=original_reply_markup,
-                        parse_mode="HTML"
-                    )
-                except Exception as e:
-                    print(f"Ошибка восстановления исходного сообщения: {e}")
-
-            # Удаляем сессию
             del reply_sessions[user_id]
             context.user_data.clear()
 
-    # Сохраняем новое оригинальное сообщение
-    context.user_data['original_text'] = original_message.text
-    context.user_data['original_chat_id'] = original_message.chat_id
-    context.user_data['original_reply_markup'] = original_message.reply_markup
+    # Добавляем текущее сообщение в список оригинальных
+    if 'original_messages' not in context.user_data:
+        context.user_data['original_messages'] = []
+
+    context.user_data['original_messages'].append({
+        'chat_id': original_message.chat_id,
+        'text': original_message.text,
+        'reply_markup': original_message.reply_markup
+    })
 
     if data == "reply_anon":
         reply_sessions[user_id] = ADMIN_ID
@@ -442,8 +438,8 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         msg = await query.edit_message_text(
-            text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
-                 f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
+            text=f"<b>✍️ Напишите ваш ответ администратору</b>\n\n"
+                 f"Ваше сообщение будет отправлено анонимно.",
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
