@@ -1,10 +1,8 @@
 import os
-import asyncio
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
 import asyncpg
 from dotenv import load_dotenv
 
@@ -25,6 +23,20 @@ DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NA
 async def get_db():
     return await asyncpg.connect(DATABASE_URL)
 
+async def table_exists(conn, table_name):
+    result = await conn.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = $1)",
+        table_name
+    )
+    return result
+
+async def column_exists(conn, table_name, column_name):
+    result = await conn.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2)",
+        table_name, column_name
+    )
+    return result
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     conn = await get_db()
@@ -34,7 +46,6 @@ async def dashboard(request: Request):
         total_payments = await conn.fetchval("SELECT COUNT(*) FROM payments") if await table_exists(conn, "payments") else 0
         total_premium = await conn.fetchval("SELECT COUNT(*) FROM users WHERE premium = true") if await column_exists(conn, "users", "premium") else 0
 
-        # Статистика за 7 дней
         stats = []
         for i in range(6, -1, -1):
             date = datetime.now().date() - timedelta(days=i)
@@ -44,8 +55,8 @@ async def dashboard(request: Request):
             )
             stats.append({
                 "date": date.strftime("%d.%m"),
-                "new_users": count,
-                "active_users": count,
+                "new_users": count or 0,
+                "active_users": count or 0,
                 "messages": 0
             })
 
@@ -72,20 +83,6 @@ async def users_page(request: Request):
         })
     finally:
         await conn.close()
-
-async def table_exists(conn, table_name):
-    result = await conn.fetchval(
-        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = $1)",
-        table_name
-    )
-    return result
-
-async def column_exists(conn, table_name, column_name):
-    result = await conn.fetchval(
-        "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2)",
-        table_name, column_name
-    )
-    return result
 
 if __name__ == "__main__":
     import uvicorn
