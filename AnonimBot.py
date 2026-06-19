@@ -8,6 +8,7 @@ import database
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = 7683869901
 
 logging.basicConfig(level=logging.INFO)
 
@@ -335,19 +336,47 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
 
-    data = query.data.split("_")
-    original_sender_id = int(data[1])
+    data = query.data
     user_id = query.from_user.id
 
-    reply_sessions[user_id] = original_sender_id
+    # Если это кнопка "Ответить" из рассылки (без ID)
+    if data == "reply_anon":
+        # Отправляем ответ администратору
+        reply_sessions[user_id] = ADMIN_ID
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"<b>✍️ Напишите ваш ответ администратору</b>\n\n"
+            f"Ваше сообщение будет отправлено анонимно.",
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+        return
 
-    keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    # Обычный ответ на анонимное сообщение (с ID)
+    if data.startswith("reply_"):
+        parts = data.split("_")
+        if len(parts) >= 2:
+            try:
+                original_sender_id = int(parts[1])
+                reply_sessions[user_id] = original_sender_id
 
+                keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                await query.edit_message_text(
+                    f"<b>✍️ Напишите ваш ответ</b>\n\n"
+                    f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
+                    reply_markup=reply_markup,
+                    parse_mode="HTML"
+                )
+                return
+            except ValueError:
+                pass
+
+    # Если что-то пошло не так
     await query.edit_message_text(
-        f"<b>✍️ Напишите ваш ответ</b>\n\n"
-        f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
-        reply_markup=reply_markup,
+        text="❌ Не удалось обработать запрос.",
         parse_mode="HTML"
     )
 
