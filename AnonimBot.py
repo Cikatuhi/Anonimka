@@ -12,6 +12,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 logging.basicConfig(level=logging.INFO)
 
 active_sessions = {}
+reply_sessions = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -76,6 +77,64 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
 
+    if user_id in reply_sessions:
+        original_sender_id = reply_sessions.pop(user_id)
+        try:
+            if update.message.text:
+                content = update.message.text
+                await context.bot.send_message(
+                    chat_id=original_sender_id,
+                    text=f"✉️ Вам пришёл анонимный ответ:\n\n{content}"
+                )
+            elif update.message.photo:
+                photo = update.message.photo[-1].file_id
+                caption = update.message.caption or ""
+                await context.bot.send_photo(
+                    chat_id=original_sender_id,
+                    photo=photo,
+                    caption=f"✉️ Вам пришёл анонимный ответ:\n\n{caption}"
+                )
+            elif update.message.video:
+                video = update.message.video.file_id
+                caption = update.message.caption or ""
+                await context.bot.send_video(
+                    chat_id=original_sender_id,
+                    video=video,
+                    caption=f"✉️ Вам пришёл анонимный ответ:\n\n{caption}"
+                )
+            elif update.message.voice:
+                voice = update.message.voice.file_id
+                await context.bot.send_voice(
+                    chat_id=original_sender_id,
+                    voice=voice,
+                    caption="✉️ Вам пришёл анонимный ответ (голосовое)"
+                )
+            elif update.message.video_note:
+                video_note = update.message.video_note.file_id
+                await context.bot.send_video_note(
+                    chat_id=original_sender_id,
+                    video_note=video_note
+                )
+            elif update.message.sticker:
+                sticker = update.message.sticker.file_id
+                await context.bot.send_message(
+                    chat_id=original_sender_id,
+                    text="✉️ Вам пришёл анонимный ответ (стикер):"
+                )
+                await context.bot.send_sticker(
+                    chat_id=original_sender_id,
+                    sticker=sticker
+                )
+            else:
+                await update.message.reply_text("⚠️ Этот тип сообщения пока не поддерживается для ответа.")
+                return
+
+            await update.message.reply_text("✅ Ваш ответ отправлен анонимно!")
+        except Exception as e:
+            await update.message.reply_text("❌ Не удалось отправить ответ. Возможно, получатель заблокировал бота.")
+            print(f"Ошибка отправки ответа: {e}")
+        return
+
     session = active_sessions.pop(user_id, None)
     if not session:
         await update.message.reply_text("Отправьте /start, чтобы получить свою ссылку.")
@@ -86,7 +145,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         reply_keyboard = [
-            [InlineKeyboardButton("✍️ Ответить", callback_data="reply_anon")],
+            [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
             [InlineKeyboardButton("👀 Узнать кто это", callback_data="who_is_it", style="primary")]
         ]
         reply_markup = InlineKeyboardMarkup(reply_keyboard)
@@ -216,15 +275,28 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     if user_id in active_sessions:
         del active_sessions[user_id]
+    if user_id in reply_sessions:
+        del reply_sessions[user_id]
 
     await query.edit_message_text("❌ Отправка отменена.")
 
 async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
+
+    data = query.data.split("_")
+    original_sender_id = int(data[1])
+    user_id = query.from_user.id
+
+    reply_sessions[user_id] = original_sender_id
+
+    keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await query.edit_message_text(
-        text=query.message.text + "\n\n🔧 Функция ответа будет доступна позже!",
+        f"<b>✍️ Напишите ваш ответ</b>\n\n"
+        f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
+        reply_markup=reply_markup,
         parse_mode="HTML"
     )
 
@@ -275,7 +347,7 @@ def main():
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(cancel_handler, pattern="cancel"))
     app.add_handler(CallbackQueryHandler(send_again_handler, pattern="send_again_"))
-    app.add_handler(CallbackQueryHandler(reply_anon_handler, pattern="reply_anon"))
+    app.add_handler(CallbackQueryHandler(reply_anon_handler, pattern="reply_"))
     app.add_handler(CallbackQueryHandler(who_is_it_handler, pattern="who_is_it"))
 
     print("🤖 Бот запущен и готов к приёму анонимных сообщений...")
