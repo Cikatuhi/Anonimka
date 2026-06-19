@@ -378,7 +378,7 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             except Exception as e:
                 print(f"Не удалось удалить сообщение с вопросом: {e}")
 
-        # Восстанавливаем исходное сообщение
+        # Восстанавливаем исходное сообщение (на которое отвечали)
         if 'original_text' in context.user_data:
             try:
                 original_text = context.user_data.get('original_text', 'Сообщение')
