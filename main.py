@@ -19,6 +19,13 @@ DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NA
 async def get_db():
     return await asyncpg.connect(DATABASE_URL)
 
+async def table_exists(conn, table_name):
+    result = await conn.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = $1)",
+        table_name
+    )
+    return result
+
 MENU = '''
 <div style="background: #2c3e50; padding: 15px; margin-bottom: 20px; border-radius: 8px;">
     <a href="/" style="color: white; text-decoration: none; margin: 0 15px; font-weight: bold;">📊 Дашборд</a>
@@ -38,16 +45,13 @@ BASE_HTML = '''
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; margin: 0; background: #f4f6f9; }
         .container { max-width: 1200px; margin: 0 auto; }
-        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .number { font-size: 48px; font-weight: bold; color: #007bff; }
-        .menu a:hover { color: #f39c12; }
+        .stats { display: flex; gap: 20px; flex-wrap: wrap; }
+        .stat-card { background: white; padding: 20px; border-radius: 10px; flex: 1; min-width: 150px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); text-align: center; }
+        .stat-number { font-size: 32px; font-weight: bold; color: #007bff; }
         table { border-collapse: collapse; width: 100%; margin-top: 20px; }
         th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
         th { background: #007bff; color: white; }
         tr:nth-child(even) { background: #f9f9f9; }
-        .stats { display: flex; gap: 20px; flex-wrap: wrap; }
-        .stat-card { background: white; padding: 20px; border-radius: 10px; flex: 1; min-width: 150px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); text-align: center; }
-        .stat-number { font-size: 32px; font-weight: bold; color: #007bff; }
         .badge {
             display: inline-block;
             padding: 3px 10px;
@@ -62,6 +66,7 @@ BASE_HTML = '''
         .badge-voice { background: #ffc107; color: #333; }
         .badge-sticker { background: #6f42c1; }
         .badge-video_note { background: #fd7e14; }
+        .menu a:hover { color: #f39c12; }
     </style>
 </head>
 <body>
@@ -91,8 +96,7 @@ async def dashboard():
             <div class="stat-card"><h3>⭐ Премиум</h3><div class="stat-number">{total_premium}</div></div>
         </div>
         '''
-        html = BASE_HTML.replace('MENU_PLACEHOLDER', MENU).replace('CONTENT_PLACEHOLDER', content)
-        return HTMLResponse(content=html)
+        return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', MENU).replace('CONTENT_PLACEHOLDER', content))
     finally:
         await conn.close()
 
@@ -130,46 +134,48 @@ async def messages_page():
             LIMIT 100
         """)
 
-        html = '''
-        <h1>💬 Сообщения</h1>
-        <table>
-            <tr>
-                <th>ID</th>
-                <th>От кого</th>
-                <th>Кому</th>
-                <th>Тип</th>
-                <th>Сообщение</th>
-                <th>Дата</th>
-            </tr>
-        '''
-        for row in rows:
-            sender = row.get('sender_username') or row.get('sender_name') or 'Неизвестно'
-            recipient = row.get('recipient_username') or row.get('recipient_name') or 'Неизвестно'
-            
-            # Цветная метка для типа сообщения
-            badge_class = "badge-text"
-            if row['content_type'] == 'photo':
-                badge_class = "badge-photo"
-            elif row['content_type'] == 'video':
-                badge_class = "badge-video"
-            elif row['content_type'] == 'voice':
-                badge_class = "badge-voice"
-            elif row['content_type'] == 'sticker':
-                badge_class = "badge-sticker"
-            elif row['content_type'] == 'video_note':
-                badge_class = "badge-video_note"
-            
-            html += f'''
-            <tr>
-                <td>{row['id']}</td>
-                <td>@{sender}</td>
-                <td>@{recipient}</td>
-                <td><span class="badge {badge_class}">{row['content_type']}</span></td>
-                <td>{row['content'][:100]}{'...' if len(row['content'] or '') > 100 else ''}</td>
-                <td>{row['created_at'].strftime('%d.%m.%Y %H:%M') if row['created_at'] else '-'}</td>
-            </tr>
+        html = '<h1>💬 Сообщения</h1>'
+        if not rows:
+            html += '<p>Сообщений пока нет.</p>'
+        else:
+            html += '''
+            <table>
+                <tr>
+                    <th>ID</th>
+                    <th>От кого</th>
+                    <th>Кому</th>
+                    <th>Тип</th>
+                    <th>Сообщение</th>
+                    <th>Дата</th>
+                </tr>
             '''
-        html += '</table>'
+            for row in rows:
+                sender = row.get('sender_username') or row.get('sender_name') or 'Неизвестно'
+                recipient = row.get('recipient_username') or row.get('recipient_name') or 'Неизвестно'
+                
+                badge_class = "badge-text"
+                if row['content_type'] == 'photo':
+                    badge_class = "badge-photo"
+                elif row['content_type'] == 'video':
+                    badge_class = "badge-video"
+                elif row['content_type'] == 'voice':
+                    badge_class = "badge-voice"
+                elif row['content_type'] == 'sticker':
+                    badge_class = "badge-sticker"
+                elif row['content_type'] == 'video_note':
+                    badge_class = "badge-video_note"
+                
+                html += f'''
+                <tr>
+                    <td>{row['id']}</td>
+                    <td>@{sender}</td>
+                    <td>@{recipient}</td>
+                    <td><span class="badge {badge_class}">{row['content_type']}</span></td>
+                    <td>{row['content'][:100]}{'...' if len(row['content'] or '') > 100 else ''}</td>
+                    <td>{row['created_at'].strftime('%d.%m.%Y %H:%M') if row['created_at'] else '-'}</td>
+                </tr>
+                '''
+            html += '</table>'
         return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', MENU).replace('CONTENT_PLACEHOLDER', html))
     finally:
         await conn.close()
@@ -188,13 +194,6 @@ async def settings_page():
 async def broadcast_page():
     content = '<h1>📢 Рассылка</h1><p>Здесь будет форма для рассылки.</p>'
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', MENU).replace('CONTENT_PLACEHOLDER', content))
-
-async def table_exists(conn, table_name):
-    result = await conn.fetchval(
-        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = $1)",
-        table_name
-    )
-    return result
 
 if __name__ == "__main__":
     import uvicorn
