@@ -80,11 +80,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in reply_sessions:
         original_sender_id = reply_sessions.pop(user_id)
         try:
+            reply_keyboard = [
+                [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
+                [InlineKeyboardButton("👀 Узнать кто это", callback_data="who_is_it", style="primary")]
+            ]
+            reply_markup = InlineKeyboardMarkup(reply_keyboard)
+
             if update.message.text:
                 content = update.message.text
                 await context.bot.send_message(
                     chat_id=original_sender_id,
-                    text=f"✉️ Вам пришёл анонимный ответ:\n\n{content}"
+                    text=f"✉️ Вам пришёл анонимный ответ:\n\n{content}",
+                    reply_markup=reply_markup
                 )
             elif update.message.photo:
                 photo = update.message.photo[-1].file_id
@@ -92,7 +99,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_photo(
                     chat_id=original_sender_id,
                     photo=photo,
-                    caption=f"✉️ Вам пришёл анонимный ответ:\n\n{caption}"
+                    caption=f"✉️ Вам пришёл анонимный ответ:\n\n{caption}",
+                    reply_markup=reply_markup
                 )
             elif update.message.video:
                 video = update.message.video.file_id
@@ -100,26 +108,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_video(
                     chat_id=original_sender_id,
                     video=video,
-                    caption=f"✉️ Вам пришёл анонимный ответ:\n\n{caption}"
+                    caption=f"✉️ Вам пришёл анонимный ответ:\n\n{caption}",
+                    reply_markup=reply_markup
                 )
             elif update.message.voice:
                 voice = update.message.voice.file_id
                 await context.bot.send_voice(
                     chat_id=original_sender_id,
                     voice=voice,
-                    caption="✉️ Вам пришёл анонимный ответ (голосовое)"
+                    caption="✉️ Вам пришёл анонимный ответ (голосовое)",
+                    reply_markup=reply_markup
                 )
             elif update.message.video_note:
                 video_note = update.message.video_note.file_id
                 await context.bot.send_video_note(
                     chat_id=original_sender_id,
-                    video_note=video_note
+                    video_note=video_note,
+                    reply_markup=reply_markup
                 )
             elif update.message.sticker:
                 sticker = update.message.sticker.file_id
                 await context.bot.send_message(
                     chat_id=original_sender_id,
-                    text="✉️ Вам пришёл анонимный ответ (стикер):"
+                    text="✉️ Вам пришёл анонимный ответ (стикер):",
+                    reply_markup=reply_markup
                 )
                 await context.bot.send_sticker(
                     chat_id=original_sender_id,
@@ -130,6 +142,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             await update.message.reply_text("✅ Ваш ответ отправлен анонимно!")
+
+            bot_username = context.bot.username
+            deep_link = f"https://t.me/{bot_username}?start={user_id}"
+
+            welcome_text = (
+                f"<b>💌 Начните получать анонимные сообщения прямо сейчас!</b>\n\n"
+                f"👉 Твоя ссылка:\n{deep_link}\n\n"
+                f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
+            )
+
+            share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
+            share_keyboard = [
+                [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
+            ]
+            share_reply_markup = InlineKeyboardMarkup(share_keyboard)
+
+            await update.message.reply_text(
+                welcome_text,
+                reply_markup=share_reply_markup,
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+
         except Exception as e:
             await update.message.reply_text("❌ Не удалось отправить ответ. Возможно, получатель заблокировал бота.")
             print(f"Ошибка отправки ответа: {e}")
