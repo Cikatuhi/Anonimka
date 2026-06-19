@@ -394,8 +394,8 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         msg = await query.edit_message_text(
-            text=f"<b>✍️ Напишите ваш ответ администратору</b>\n\n"
-                 f"Ваше сообщение будет отправлено анонимно.",
+            text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
+                 f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
