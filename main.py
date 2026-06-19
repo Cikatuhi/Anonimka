@@ -1,5 +1,4 @@
 import os
-from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -27,10 +26,14 @@ async def dashboard(request: Request):
     conn = await get_db()
     try:
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
-        return templates.TemplateResponse("dashboard.html", {
-            "request": request,
-            "total_users": total_users or 0
-        })
+        # Передаём данные как простые переменные
+        return templates.TemplateResponse(
+            "dashboard.html", 
+            {
+                "request": request,
+                "total_users": total_users or 0
+            }
+        )
     finally:
         await conn.close()
 
@@ -39,10 +42,15 @@ async def users_page(request: Request):
     conn = await get_db()
     try:
         users = await conn.fetch("SELECT * FROM users ORDER BY registered_at DESC LIMIT 100")
-        return templates.TemplateResponse("users.html", {
-            "request": request,
-            "users": users
-        })
+        # Преобразуем записи в словари для безопасной передачи в шаблон
+        users_list = [dict(user) for user in users]
+        return templates.TemplateResponse(
+            "users.html",
+            {
+                "request": request,
+                "users": users_list
+            }
+        )
     finally:
         await conn.close()
 
