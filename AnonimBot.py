@@ -145,6 +145,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text("✅ Ваш ответ отправлен анонимно!")
 
+            # Устанавливаем флаг, что ответ отправлен
+            context.user_data['answer_sent'] = True
+
             bot_username = context.bot.username
             deep_link = f"https://t.me/{bot_username}?start={user_id}"
 
@@ -333,7 +336,6 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in reply_sessions:
         del reply_sessions[user_id]
 
-        # Удаляем сообщение с вопросом
         if 'question_message_id' in context.user_data:
             try:
                 await context.bot.delete_message(
@@ -343,7 +345,6 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 print(f"Не удалось удалить сообщение с вопросом: {e}")
 
-        # Восстанавливаем ВСЕ исходные сообщения из списка
         if 'original_messages' in context.user_data:
             for msg_data in context.user_data['original_messages']:
                 try:
@@ -379,7 +380,6 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     original_message = query.message
 
-    # Если пользователь уже отвечает — закрываем старый ответ
     if user_id in reply_sessions:
         old_recipient = reply_sessions[user_id]
 
@@ -396,33 +396,37 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 new_recipient = None
 
         if new_recipient is not None and new_recipient != old_recipient:
-            # Удаляем сообщение с вопросом
-            if 'question_message_id' in context.user_data:
-                try:
-                    await context.bot.delete_message(
-                        chat_id=user_id,
-                        message_id=context.user_data['question_message_id']
-                    )
-                except Exception as e:
-                    print(f"Не удалось удалить сообщение с вопросом: {e}")
-
-            # Восстанавливаем ВСЕ исходные сообщения из списка
-            if 'original_messages' in context.user_data:
-                for msg_data in context.user_data['original_messages']:
+            # Проверяем, был ли отправлен ответ
+            if not context.user_data.get('answer_sent', False):
+                # Ответ не отправлен → отменяем старый ответ
+                if 'question_message_id' in context.user_data:
                     try:
-                        await context.bot.send_message(
-                            chat_id=msg_data['chat_id'],
-                            text=msg_data['text'],
-                            reply_markup=msg_data['reply_markup'],
-                            parse_mode="HTML"
+                        await context.bot.delete_message(
+                            chat_id=user_id,
+                            message_id=context.user_data['question_message_id']
                         )
                     except Exception as e:
-                        print(f"Ошибка восстановления сообщения: {e}")
+                        print(f"Не удалось удалить сообщение с вопросом: {e}")
 
-            del reply_sessions[user_id]
-            context.user_data.clear()
+                if 'original_messages' in context.user_data:
+                    for msg_data in context.user_data['original_messages']:
+                        try:
+                            await context.bot.send_message(
+                                chat_id=msg_data['chat_id'],
+                                text=msg_data['text'],
+                                reply_markup=msg_data['reply_markup'],
+                                parse_mode="HTML"
+                            )
+                        except Exception as e:
+                            print(f"Ошибка восстановления сообщения: {e}")
 
-    # Добавляем текущее сообщение в список оригинальных
+                del reply_sessions[user_id]
+                context.user_data.clear()
+            else:
+                # Ответ уже отправлен → блокируем новый ответ
+                await query.answer("⚠️ Вы уже отправили ответ на предыдущее сообщение.", show_alert=True)
+                return
+
     if 'original_messages' not in context.user_data:
         context.user_data['original_messages'] = []
 
@@ -432,14 +436,16 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         'reply_markup': original_message.reply_markup
     })
 
+    context.user_data['answer_sent'] = False
+
     if data == "reply_anon":
         reply_sessions[user_id] = ADMIN_ID
         keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         msg = await query.edit_message_text(
-            text=f"<b>✍️ Напишите ваш ответ администратору</b>\n\n"
-                 f"Ваше сообщение будет отправлено анонимно.",
+            text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
+                 f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
