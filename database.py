@@ -148,3 +148,48 @@ async def get_all_users():
         return [row['telegram_id'] for row in rows]
     finally:
         await conn.close()
+
+async def add_subscription(user_id: int, plan: str, end_date):
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        await conn.execute(
+            "INSERT INTO subscriptions (user_id, plan, end_date, status) VALUES ($1, $2, $3, 'active')",
+            user_id, plan, end_date
+        )
+    finally:
+        await conn.close()
+
+async def get_user_active_subscription(user_id: int):
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        row = await conn.fetchrow(
+            "SELECT * FROM subscriptions WHERE user_id = $1 AND status = 'active' AND (end_date IS NULL OR end_date > NOW()) ORDER BY end_date DESC LIMIT 1",
+            user_id
+        )
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+async def get_all_subscriptions(limit: int = 100, offset: int = 0):
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        rows = await conn.fetch("""
+            SELECT s.*, u.username, u.first_name 
+            FROM subscriptions s
+            LEFT JOIN users u ON s.user_id = u.telegram_id
+            ORDER BY s.created_at DESC
+            LIMIT $1 OFFSET $2
+        """, limit, offset)
+        return [dict(row) for row in rows]
+    finally:
+        await conn.close()
+
+async def count_active_subscriptions():
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM subscriptions WHERE status = 'active' AND (end_date IS NULL OR end_date > NOW())"
+        )
+        return count
+    finally:
+        await conn.close()
