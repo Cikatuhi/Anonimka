@@ -1,5 +1,6 @@
 import os
 import asyncio
+import uuid
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 import asyncpg
@@ -30,7 +31,34 @@ async def table_exists(conn, table_name):
     )
     return result
 
+# ===================== ФУНКЦИИ ДЛЯ ПОДПИСОК =====================
+async def count_active_subscriptions():
+    conn = await get_db()
+    try:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM subscriptions WHERE status = 'active' AND (end_date IS NULL OR end_date > NOW())"
+        )
+        return count
+    finally:
+        await conn.close()
+
+async def get_all_subscriptions(limit: int = 100, offset: int = 0):
+    conn = await get_db()
+    try:
+        rows = await conn.fetch("""
+            SELECT s.*, u.username, u.first_name 
+            FROM subscriptions s
+            LEFT JOIN users u ON s.user_id = u.telegram_id
+            ORDER BY s.created_at DESC
+            LIMIT $1 OFFSET $2
+        """, limit, offset)
+        return [dict(row) for row in rows]
+    finally:
+        await conn.close()
+# ================================================================
+
 broadcast_results = {}
+broadcast_progress = {}
 
 MENU = '''
 <div style="background: #0a0a1a; padding: 10px 15px; border: 1px solid #00ffcc33; border-radius: 12px 12px 0 0; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; box-shadow: 0 0 30px #00ffcc11;">
@@ -43,6 +71,9 @@ MENU = '''
     <a href="/messages" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
        onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
        onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">💬 Сообщения</a>
+    <a href="/subscriptions" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
+       onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
+       onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">📋 Подписки</a>
     <a href="/withdrawals" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
        onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
        onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">💰 Снятия</a>
@@ -73,23 +104,19 @@ BASE_HTML = '''
         .menu a { display: inline-block; padding: 10px 12px; color: #a6adc8; text-decoration: none; font-weight: 500; font-size: 13px; border-bottom: 3px solid transparent; transition: all 0.2s; white-space: nowrap; }
         .menu a:hover { color: #cdd6f4; border-bottom-color: #89b4fa; }
         .menu a.active { color: #cdd6f4; border-bottom-color: #89b4fa; font-weight: 600; }
-        
         .page-title { font-size: 20px; font-weight: 700; margin-bottom: 15px; color: #cdd6f4; text-shadow: 0 0 40px #00ffcc11; }
-        
         .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
         .stat-card { background: #111128; padding: 15px 12px; border-radius: 12px; text-align: center; transition: all 0.3s ease; border: 1px solid #00ffcc22; }
         .stat-card:hover { transform: translateY(-4px); border: 1px solid #00ffcc; box-shadow: 0 0 30px #00ffcc33; background: #00ffcc11; }
         .stat-number { font-size: 28px; font-weight: 700; color: #00ffcc; text-shadow: 0 0 40px #00ffcc44; }
         .stat-label { font-size: 12px; color: #8899aa; margin-top: 4px; }
         .stat-card .icon { font-size: 24px; margin-bottom: 5px; display: block; }
-        
         .table-container { background: #111128; border-radius: 12px; overflow-x: auto; border: 1px solid #00ffcc22; transition: all 0.3s ease; }
         .table-container:hover { border: 1px solid #00ffcc44; box-shadow: 0 0 30px #00ffcc11; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th { background: #0a0a1a; color: #00ffcc; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; padding: 10px 8px; text-align: left; border-bottom: 1px solid #00ffcc22; }
         td { padding: 8px 8px; border-bottom: 1px solid #1a1a3a; font-size: 13px; color: #cdd6f4; word-break: break-word; }
         tr:hover td { background: #00ffcc11; }
-        
         .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; border: 1px solid transparent; white-space: nowrap; }
         .badge-text { background: #00ffcc22; color: #00ffcc; border-color: #00ffcc44; }
         .badge-photo { background: #4488ff22; color: #4488ff; border-color: #4488ff44; }
@@ -97,7 +124,6 @@ BASE_HTML = '''
         .badge-voice { background: #ffaa4422; color: #ffaa44; border-color: #ffaa4444; }
         .badge-sticker { background: #aa44ff22; color: #aa44ff; border-color: #aa44ff44; }
         .badge-video_note { background: #ff664422; color: #ff6644; border-color: #ff664444; }
-        
         .form-container { background: #111128; padding: 20px; border-radius: 12px; border: 1px solid #00ffcc22; }
         .form-container:hover { border: 1px solid #00ffcc44; box-shadow: 0 0 30px #00ffcc11; }
         label { display: block; margin-bottom: 6px; color: #8899aa; font-weight: 500; font-size: 14px; }
@@ -119,7 +145,8 @@ BASE_HTML = '''
         .result-message { background: #0a0a1a; padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #00ffcc22; word-break: break-word; font-size: 14px; }
         .glow-button { display: inline-block; padding: 10px 20px; border: 1px solid #00ffcc; border-radius: 8px; color: #00ffcc; text-decoration: none; transition: all 0.3s ease; text-align: center; width: 100%; }
         .glow-button:hover { background: #00ffcc22; box-shadow: 0 0 30px #00ffcc55; }
-        
+        .progress-bar { width: 100%; height: 20px; background: #1a1a3a; border-radius: 10px; overflow: hidden; margin: 10px 0; border: 1px solid #00ffcc33; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #00ffcc, #00ff88); transition: width 0.5s ease; border-radius: 10px; width: 0%; }
         @media (max-width: 600px) {
             .container { padding: 8px 10px; }
             .menu a { font-size: 11px; padding: 6px 8px; }
@@ -163,7 +190,7 @@ def get_badge_class(content_type):
     }
     return types.get(content_type, 'text')
 
-async def send_broadcast_message(bot_token: str, user_ids: list, text: str):
+async def send_broadcast_message(bot_token: str, user_ids: list, text: str, progress_id: str = None):
     import httpx
     
     results = {
@@ -237,10 +264,32 @@ async def send_broadcast_message(bot_token: str, user_ids: list, text: str):
                 results['failed'] += 1
                 results['errors'].append(f"User {user_id}: {str(e)[:50]}")
             
+            # Обновляем прогресс
+            if progress_id and (i % 5 == 0 or i == len(user_ids) - 1):
+                broadcast_progress[progress_id] = {
+                    'total': len(user_ids),
+                    'sent': results['sent'],
+                    'failed': results['failed'],
+                    'blocked': results['blocked'],
+                    'processed': i + 1
+                }
+            
             if i % 30 == 0:
                 await asyncio.sleep(0.1)
     
+    if progress_id:
+        broadcast_progress[progress_id] = {
+            'total': len(user_ids),
+            'sent': results['sent'],
+            'failed': results['failed'],
+            'blocked': results['blocked'],
+            'processed': len(user_ids),
+            'finished': True
+        }
+    
     return results
+
+# ===================== МАРШРУТЫ =====================
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
@@ -248,6 +297,7 @@ async def dashboard():
     try:
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
         total_messages = await conn.fetchval("SELECT COUNT(*) FROM messages") if await table_exists(conn, "messages") else 0
+        total_subscriptions = await count_active_subscriptions()
         total_premium = 0
         total_payments = 0
         total_revenue = "0"
@@ -256,6 +306,7 @@ async def dashboard():
         <div class="page-title">📊 Дашборд</div>
         <div class="stats">
             <div class="stat-card"><span class="icon">👥</span><div class="stat-number">{total_users}</div><div class="stat-label">Пользователи</div></div>
+            <div class="stat-card"><span class="icon">📋</span><div class="stat-number">{total_subscriptions}</div><div class="stat-label">Подписки</div></div>
             <div class="stat-card"><span class="icon">⭐</span><div class="stat-number">{total_premium}</div><div class="stat-label">Премиум</div></div>
             <div class="stat-card"><span class="icon">💬</span><div class="stat-number">{total_messages}</div><div class="stat-label">Сообщений</div></div>
             <div class="stat-card"><span class="icon">💳</span><div class="stat-number">{total_payments}</div><div class="stat-label">Платежей ({total_revenue} ₽)</div></div>
@@ -330,6 +381,41 @@ async def messages_page():
     finally:
         await conn.close()
 
+@app.get("/subscriptions", response_class=HTMLResponse)
+async def subscriptions_page():
+    conn = await get_db()
+    try:
+        rows = await get_all_subscriptions(limit=200)
+        total_active = await count_active_subscriptions()
+        
+        html = f'<div class="page-title">📋 Подписки</div>'
+        html += f'<div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">'
+        html += f'<div class="stat-card"><div class="stat-number">{total_active}</div><div class="stat-label">Активных подписок</div></div></div>'
+        
+        if rows:
+            html += '<div class="table-container"><table><tr><th>ID</th><th>Пользователь</th><th>План</th><th>Начало</th><th>Окончание</th><th>Статус</th></tr>'
+            for row in rows:
+                status_color = "#00ffcc" if row['status'] == 'active' else "#ff4488"
+                end_date_str = row['end_date'].strftime('%d.%m.%Y') if row['end_date'] else '∞'
+                html += f'''
+                <tr>
+                    <td>{row['id']}</td>
+                    <td>@{row.get('username') or row.get('first_name') or row['user_id']}</td>
+                    <td>{row['plan']}</td>
+                    <td>{row['start_date'].strftime('%d.%m.%Y') if row['start_date'] else '-'}</td>
+                    <td>{end_date_str}</td>
+                    <td><span style="color:{status_color};">{row['status']}</span></td>
+                </tr>
+                '''
+            html += '</table></div>'
+        else:
+            html += '<div class="empty">😕 Подписок пока нет</div>'
+            
+        menu = MENU.replace('📋 Подписки', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📋 Подписки</span>')
+        return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
+    finally:
+        await conn.close()
+
 @app.get("/blocked", response_class=HTMLResponse)
 async def blocked_page():
     conn = await get_db()
@@ -361,6 +447,7 @@ async def broadcast_page(request: Request):
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
         
         result_id = request.query_params.get("result")
+        progress_id = request.query_params.get("progress")
         result_html = ""
         
         if result_id and result_id in broadcast_results:
@@ -380,6 +467,25 @@ async def broadcast_page(request: Request):
                     <p style="color: #cdd6f4;">{results['text']}</p>
                 </div>
                 <a href="/broadcast" class="glow-button">⬅️ Новая рассылка</a>
+            </div>
+            '''
+        elif progress_id and progress_id in broadcast_progress:
+            prog = broadcast_progress[progress_id]
+            percent = int((prog['processed'] / prog['total']) * 100) if prog['total'] > 0 else 0
+            result_html = f'''
+            <div class="result-box" style="border-color: #00ffcc44; margin-top: 20px;">
+                <h2 style="color: #00ffcc;">⏳ Рассылка в процессе...</h2>
+                <div class="result-stats">
+                    <div><div class="number">{prog['processed']}/{prog['total']}</div><div class="label">Обработано</div></div>
+                    <div><div class="number" style="color: #00ffcc;">{prog['sent']}</div><div class="label">✅ Доставлено</div></div>
+                    <div><div class="number" style="color: #ff4488;">{prog['failed']}</div><div class="label">❌ Ошибок</div></div>
+                    <div><div class="number" style="color: #ffaa44;">{prog['blocked']}</div><div class="label">🚫 В ЧС</div></div>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width:{percent}%;"></div>
+                </div>
+                <p style="text-align:center; color:#8899aa; font-size:13px;">{percent}% выполнено</p>
+                <a href="/broadcast" class="glow-button" style="margin-top:10px;">⬅️ Назад</a>
             </div>
             '''
         
@@ -404,10 +510,6 @@ async def broadcast_page(request: Request):
                 var btn = document.getElementById('sendBtn');
                 btn.disabled = true;
                 btn.textContent = '⏳ Отправка...';
-                setTimeout(function() {{
-                    btn.disabled = false;
-                    btn.textContent = '🚀 Отправить рассылку';
-                }}, 5000);
             }});
         </script>
         '''
@@ -427,14 +529,17 @@ async def send_broadcast(request: Request, message: str = Form(...)):
         rows = await conn.fetch("SELECT telegram_id FROM users")
         user_ids = [row['telegram_id'] for row in rows]
         
-        results = await send_broadcast_message(BOT_TOKEN, user_ids, message)
-        results['text'] = message
+        progress_id = str(uuid.uuid4())[:8]
         
-        import uuid
-        result_id = str(uuid.uuid4())[:8]
-        broadcast_results[result_id] = results
+        # Запускаем рассылку в фоне
+        import threading
+        def run_broadcast():
+            asyncio.run(send_broadcast_message(BOT_TOKEN, user_ids, message, progress_id))
         
-        return RedirectResponse(url=f"/broadcast?result={result_id}", status_code=303)
+        thread = threading.Thread(target=run_broadcast)
+        thread.start()
+        
+        return RedirectResponse(url=f"/broadcast?progress={progress_id}", status_code=303)
     finally:
         await conn.close()
 
