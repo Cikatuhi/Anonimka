@@ -41,6 +41,19 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                plan TEXT NOT NULL,
+                start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                end_date TIMESTAMP,
+                status TEXT DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_end_date ON subscriptions(end_date)")
     finally:
         await conn.close()
 
@@ -83,7 +96,6 @@ async def save_message(sender_id: int, recipient_id: int, content: str, content_
         await conn.close()
 
 async def add_blocked_user(user_id: int, username: str, first_name: str):
-    """Добавляет пользователя в список ЧС и удаляет из основной таблицы"""
     conn = await asyncpg.connect(DATABASE_URL)
     try:
         await conn.execute(
@@ -98,7 +110,6 @@ async def add_blocked_user(user_id: int, username: str, first_name: str):
         await conn.close()
 
 async def remove_blocked_user(user_id: int):
-    """Удаляет пользователя из списка ЧС и возвращает в основную таблицу"""
     conn = await asyncpg.connect(DATABASE_URL)
     try:
         row = await conn.fetchrow(
@@ -120,7 +131,6 @@ async def remove_blocked_user(user_id: int):
         await conn.close()
 
 async def is_user_blocked(user_id: int):
-    """Проверяет, находится ли пользователь в ЧС"""
     conn = await asyncpg.connect(DATABASE_URL)
     try:
         row = await conn.fetchrow(
@@ -132,7 +142,6 @@ async def is_user_blocked(user_id: int):
         await conn.close()
 
 async def get_blocked_users():
-    """Получает список всех заблокировавших пользователей"""
     conn = await asyncpg.connect(DATABASE_URL)
     try:
         rows = await conn.fetch("SELECT * FROM blocked_users ORDER BY blocked_at DESC")
@@ -141,7 +150,6 @@ async def get_blocked_users():
         await conn.close()
 
 async def get_all_users():
-    """Получает список всех активных пользователей"""
     conn = await asyncpg.connect(DATABASE_URL)
     try:
         rows = await conn.fetch("SELECT telegram_id FROM users")
