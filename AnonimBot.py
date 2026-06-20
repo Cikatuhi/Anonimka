@@ -194,15 +194,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         except Exception as e:
             error_text = str(e).lower()
-            if "bot was blocked" in error_text or "forbidden" in error_text:
-                user_data = await database.get_user(original_sender_id)
-                if user_data:
-                    await database.add_blocked_user(
-                        original_sender_id,
-                        user_data.get('username', ''),
-                        user_data.get('first_name', '')
-                    )
-                await update.message.reply_text("⚠️ Пользователь заблокировал бота. Он был удалён из базы.")
+            if any(keyword in error_text for keyword in [
+                "bot was blocked", 
+                "forbidden", 
+                "user is deactivated", 
+                "bot was kicked", 
+                "chat not found",
+                "can't send messages to user"
+            ]):
+                if original_sender_id:
+                    user_data = await database.get_user(original_sender_id)
+                    if user_data:
+                        await database.add_blocked_user(
+                            original_sender_id,
+                            user_data.get('username', ''),
+                            user_data.get('first_name', '')
+                        )
+                        await update.message.reply_text(
+                            f"⚠️ Пользователь @{user_data.get('username', '')} заблокировал бота. Он удалён из базы."
+                        )
+                    else:
+                        if await database.is_user_blocked(original_sender_id):
+                            await update.message.reply_text("⚠️ Этот пользователь уже в чёрном списке.")
             else:
                 await update.message.reply_text("❌ Не удалось отправить ответ. Возможно, получатель заблокировал бота.")
                 print(f"Ошибка отправки ответа: {e}")
@@ -327,7 +340,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         error_text = str(e).lower()
-        if "bot was blocked" in error_text or "forbidden" in error_text:
+        if any(keyword in error_text for keyword in [
+            "bot was blocked", 
+            "forbidden", 
+            "user is deactivated", 
+            "bot was kicked", 
+            "chat not found",
+            "can't send messages to user"
+        ]):
             user_data = await database.get_user(recipient_id)
             if user_data:
                 await database.add_blocked_user(
@@ -335,7 +355,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     user_data.get('username', ''),
                     user_data.get('first_name', '')
                 )
-            await update.message.reply_text("⚠️ Пользователь заблокировал бота. Он был удалён из базы.")
+                await update.message.reply_text(
+                    f"⚠️ Пользователь @{user_data.get('username', '')} заблокировал бота. Он удалён из базы."
+                )
+            else:
+                if await database.is_user_blocked(recipient_id):
+                    await update.message.reply_text("⚠️ Этот пользователь уже в чёрном списке.")
         else:
             await update.message.reply_text("❌ Не удалось отправить сообщение. Возможно, получатель заблокировал бота.")
             print(f"Ошибка отправки: {e}")
