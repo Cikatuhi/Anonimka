@@ -22,6 +22,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username or "без_юзернейма"
     first_name = user.first_name or "Пользователь"
 
+    # Проверяем, не находится ли пользователь в ЧС
+    if await database.is_user_blocked(user_id):
+        await database.remove_blocked_user(user_id)
+
     await database.register_user(user_id, username, first_name)
 
     await update.message.reply_text("💌")
@@ -145,7 +149,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await update.message.reply_text("✅ Ваш ответ отправлен анонимно!")
 
-            # Восстанавливаем исходное сообщение (редактируем, а не отправляем новое)
             if 'original_text' in context.user_data and 'question_message_id' in context.user_data:
                 try:
                     original_text = context.user_data.get('original_text', 'Сообщение')
@@ -153,13 +156,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     original_chat_id = context.user_data.get('original_chat_id', user_id)
                     question_message_id = context.user_data.get('question_message_id')
 
-                    # Удаляем сообщение с вопросом
                     await context.bot.delete_message(
                         chat_id=user_id,
                         message_id=question_message_id
                     )
 
-                    # Отправляем исходное сообщение заново (оно будет на том же месте)
                     await context.bot.send_message(
                         chat_id=original_chat_id,
                         text=original_text,
@@ -192,8 +193,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         except Exception as e:
-            await update.message.reply_text("❌ Не удалось отправить ответ. Возможно, получатель заблокировал бота.")
-            print(f"Ошибка отправки ответа: {e}")
+            error_text = str(e).lower()
+            if "bot was blocked" in error_text or "forbidden" in error_text:
+                user_data = await database.get_user(original_sender_id)
+                if user_data:
+                    await database.add_blocked_user(
+                        original_sender_id,
+                        user_data.get('username', ''),
+                        user_data.get('first_name', '')
+                    )
+                await update.message.reply_text("⚠️ Пользователь заблокировал бота. Он был удалён из базы.")
+            else:
+                await update.message.reply_text("❌ Не удалось отправить ответ. Возможно, получатель заблокировал бота.")
+                print(f"Ошибка отправки ответа: {e}")
         return
 
     session = active_sessions.pop(user_id, None)
@@ -314,8 +326,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
-        await update.message.reply_text("❌ Не удалось отправить сообщение. Возможно, получатель заблокировал бота.")
-        print(f"Ошибка отправки: {e}")
+        error_text = str(e).lower()
+        if "bot was blocked" in error_text or "forbidden" in error_text:
+            user_data = await database.get_user(recipient_id)
+            if user_data:
+                await database.add_blocked_user(
+                    recipient_id,
+                    user_data.get('username', ''),
+                    user_data.get('first_name', '')
+                )
+            await update.message.reply_text("⚠️ Пользователь заблокировал бота. Он был удалён из базы.")
+        else:
+            await update.message.reply_text("❌ Не удалось отправить сообщение. Возможно, получатель заблокировал бота.")
+            print(f"Ошибка отправки: {e}")
 
 async def send_again_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -352,7 +375,6 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in reply_sessions:
         del reply_sessions[user_id]
 
-        # Удаляем сообщение с вопросом
         if 'question_message_id' in context.user_data:
             try:
                 await context.bot.delete_message(
@@ -362,7 +384,6 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 print(f"Не удалось удалить сообщение с вопросом: {e}")
 
-        # Восстанавливаем исходное сообщение
         if 'original_text' in context.user_data:
             try:
                 original_text = context.user_data.get('original_text', 'Сообщение')
