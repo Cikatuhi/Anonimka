@@ -22,7 +22,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username or "без_юзернейма"
     first_name = user.first_name or "Пользователь"
 
-    # Проверяем, не находится ли пользователь в ЧС
     if await database.is_user_blocked(user_id):
         await database.remove_blocked_user(user_id)
 
