@@ -26,9 +26,6 @@ wakaq = WakaQ(
     soft_timeout=3600,
     hard_timeout=7200,
     max_retries=3,
-    redis_host=REDIS_HOST,
-    redis_port=REDIS_PORT,
-    redis_db=REDIS_DB,
 )
 
 async def get_db():
