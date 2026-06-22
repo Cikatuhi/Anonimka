@@ -1,6 +1,10 @@
 import os
 import asyncio
 import uuid
+import json
+import psutil
+import threading
+from datetime import datetime
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 import asyncpg
@@ -20,6 +24,9 @@ DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NA
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 7683869901
+
+# Глобальный словарь для активных задач
+active_jobs = {}
 
 async def get_db():
     return await asyncpg.connect(DATABASE_URL)
@@ -57,8 +64,182 @@ async def get_all_subscriptions(limit: int = 100, offset: int = 0):
         await conn.close()
 # ================================================================
 
-broadcast_results = {}
-broadcast_progress = {}
+# ===================== ФУНКЦИИ ДЛЯ РАССЫЛКИ =====================
+
+def get_cpu_usage():
+    """Получает текущую загрузку CPU в процентах"""
+    return psutil.cpu_percent(interval=0.5)
+
+def get_memory_usage():
+    """Получает текущую загрузку памяти в процентах"""
+    return psutil.virtual_memory().percent
+
+async def create_broadcast_job(message: str, user_ids: list):
+    """Создаёт задание на рассылку в БД"""
+    conn = await get_db()
+    try:
+        job_id = await conn.fetchval("""
+            INSERT INTO broadcast_jobs (message, total_users, user_ids_json, status, created_at)
+            VALUES ($1, $2, $3::jsonb, 'pending', NOW())
+            RETURNING id
+        """, message, len(user_ids), json.dumps(user_ids))
+        return job_id
+    finally:
+        await conn.close()
+
+async def update_job_status(job_id: int, status: str, **kwargs):
+    """Обновляет статус задания"""
+    conn = await get_db()
+    try:
+        fields = []
+        values = []
+        for key, val in kwargs.items():
+            fields.append(f"{key} = ${len(values)+1}")
+            values.append(val)
+        values.append(job_id)
+        if fields:
+            query = f"UPDATE broadcast_jobs SET {', '.join(fields)} WHERE id = ${len(values)}"
+            await conn.execute(query, *values)
+        else:
+            await conn.execute("UPDATE broadcast_jobs SET status = $1 WHERE id = $2", status, job_id)
+    finally:
+        await conn.close()
+
+async def get_job_status(job_id: int):
+    """Получает статус задания"""
+    conn = await get_db()
+    try:
+        row = await conn.fetchrow("SELECT * FROM broadcast_jobs WHERE id = $1", job_id)
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+async def send_broadcast_with_monitoring(job_id: int, bot_token: str):
+    """Отправляет рассылку с мониторингом нагрузки"""
+    import httpx
+    
+    job = await get_job_status(job_id)
+    if not job:
+        return
+    
+    user_ids = job['user_ids_json']
+    message = job['message']
+    total = len(user_ids)
+    
+    results = {
+        'sent': 0,
+        'failed': 0,
+        'blocked': 0,
+        'errors': []
+    }
+    
+    keyboard = {
+        "inline_keyboard": [
+            [{"text": "✍️ Ответить", "callback_data": "reply_anon"}],
+            [{"text": "👀 Узнать кто это", "callback_data": "who_is_it", "style": "primary"}]
+        ]
+    }
+    
+    message_text = f"✉️ Вам пришло анонимное сообщение:\n\n{message}"
+    
+    # Обновляем статус на running
+    await update_job_status(job_id, 'running', started_at=datetime.now())
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for i, user_id in enumerate(user_ids):
+            # Проверяем нагрузку CPU каждые 10 сообщений
+            if i % 10 == 0 and i > 0:
+                cpu = get_cpu_usage()
+                memory = get_memory_usage()
+                await update_job_status(job_id, 'running', cpu_usage=cpu, memory_usage=memory)
+                
+                # Если CPU > 80% — ставим на паузу
+                if cpu > 80:
+                    await update_job_status(job_id, 'paused', paused_at=datetime.now())
+                    # Ждём пока нагрузка упадёт до 60%
+                    while get_cpu_usage() > 60:
+                        await asyncio.sleep(5)
+                    # Возобновляем
+                    await update_job_status(job_id, 'running')
+            
+            try:
+                url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                payload = {
+                    "chat_id": user_id,
+                    "text": message_text,
+                    "parse_mode": "HTML",
+                    "reply_markup": keyboard
+                }
+                response = await client.post(url, json=payload)
+                
+                if response.status_code == 200:
+                    results['sent'] += 1
+                else:
+                    error_data = response.json()
+                    error_text = str(error_data).lower()
+                    
+                    if any(keyword in error_text for keyword in [
+                        "bot was blocked", "forbidden", "user is deactivated",
+                        "bot was kicked", "chat not found", "can't send messages to user"
+                    ]):
+                        results['blocked'] += 1
+                        try:
+                            conn = await get_db()
+                            user_data = await conn.fetchrow(
+                                "SELECT username, first_name FROM users WHERE telegram_id = $1",
+                                user_id
+                            )
+                            if user_data:
+                                await conn.execute(
+                                    "INSERT INTO blocked_users (telegram_id, username, first_name) VALUES ($1, $2, $3) ON CONFLICT (telegram_id) DO NOTHING",
+                                    user_id, user_data['username'], user_data['first_name']
+                                )
+                                await conn.execute(
+                                    "DELETE FROM users WHERE telegram_id = $1",
+                                    user_id
+                                )
+                            await conn.close()
+                        except Exception as db_error:
+                            print(f"Ошибка БД при добавлении в ЧС: {db_error}")
+                    else:
+                        results['failed'] += 1
+                        results['errors'].append(f"User {user_id}: {response.status_code}")
+                        
+            except Exception as e:
+                results['failed'] += 1
+                results['errors'].append(f"User {user_id}: {str(e)[:50]}")
+            
+            # Обновляем прогресс каждые 10 сообщений
+            if i % 10 == 0 or i == total - 1:
+                progress = ((i + 1) / total) * 100
+                await update_job_status(
+                    job_id, 'running',
+                    sent_users=results['sent'],
+                    failed_users=results['failed'],
+                    blocked_users=results['blocked'],
+                    progress=progress
+                )
+            
+            if i % 30 == 0:
+                await asyncio.sleep(0.1)
+    
+    # Завершаем задание
+    await update_job_status(
+        job_id, 'completed',
+        sent_users=results['sent'],
+        failed_users=results['failed'],
+        blocked_users=results['blocked'],
+        progress=100,
+        finished_at=datetime.now()
+    )
+    
+    # Удаляем из активных задач
+    if job_id in active_jobs:
+        del active_jobs[job_id]
+
+# ================================================================
+
+# ===================== HTML ШАБЛОНЫ =====================
 
 MENU = '''
 <div style="background: #0a0a1a; padding: 10px 15px; border: 1px solid #00ffcc33; border-radius: 12px 12px 0 0; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; box-shadow: 0 0 30px #00ffcc11;">
@@ -147,6 +328,15 @@ BASE_HTML = '''
         .glow-button:hover { background: #00ffcc22; box-shadow: 0 0 30px #00ffcc55; }
         .progress-bar { width: 100%; height: 20px; background: #1a1a3a; border-radius: 10px; overflow: hidden; margin: 10px 0; border: 1px solid #00ffcc33; }
         .progress-fill { height: 100%; background: linear-gradient(90deg, #00ffcc, #00ff88); transition: width 0.5s ease; border-radius: 10px; width: 0%; }
+        .status-running { color: #00ffcc; }
+        .status-paused { color: #ffaa44; }
+        .status-completed { color: #44ff88; }
+        .status-pending { color: #8899aa; }
+        .status-failed { color: #ff4488; }
+        .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; }
+        .detail-item { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #1a1a3a; }
+        .detail-item .label { color: #8899aa; }
+        .detail-item .value { color: #cdd6f4; font-weight: 500; }
         @media (max-width: 600px) {
             .container { padding: 8px 10px; }
             .menu a { font-size: 11px; padding: 6px 8px; }
@@ -163,6 +353,7 @@ BASE_HTML = '''
             .result-stats { grid-template-columns: repeat(2, 1fr); }
             .form-container { padding: 15px; }
             textarea { font-size: 13px; }
+            .detail-grid { grid-template-columns: 1fr; }
         }
         @media (max-width: 400px) {
             .stats { grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -189,105 +380,6 @@ def get_badge_class(content_type):
         'video_note': 'video_note'
     }
     return types.get(content_type, 'text')
-
-async def send_broadcast_message(bot_token: str, user_ids: list, text: str, progress_id: str = None):
-    import httpx
-    
-    results = {
-        'total': len(user_ids),
-        'sent': 0,
-        'failed': 0,
-        'blocked': 0,
-        'errors': []
-    }
-    
-    keyboard = {
-        "inline_keyboard": [
-            [{"text": "✍️ Ответить", "callback_data": "reply_anon"}],
-            [{"text": "👀 Узнать кто это", "callback_data": "who_is_it", "style": "primary"}]
-        ]
-    }
-    
-    message_text = f"✉️ Вам пришло анонимное сообщение:\n\n{text}"
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        for i, user_id in enumerate(user_ids):
-            try:
-                url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-                payload = {
-                    "chat_id": user_id,
-                    "text": message_text,
-                    "parse_mode": "HTML",
-                    "reply_markup": keyboard
-                }
-                response = await client.post(url, json=payload)
-                
-                if response.status_code == 200:
-                    results['sent'] += 1
-                else:
-                    error_data = response.json()
-                    error_text = str(error_data).lower()
-                    
-                    if any(keyword in error_text for keyword in [
-                        "bot was blocked", 
-                        "forbidden", 
-                        "user is deactivated", 
-                        "bot was kicked", 
-                        "chat not found",
-                        "can't send messages to user"
-                    ]):
-                        results['blocked'] += 1
-                        try:
-                            conn = await get_db()
-                            user_data = await conn.fetchrow(
-                                "SELECT username, first_name FROM users WHERE telegram_id = $1",
-                                user_id
-                            )
-                            if user_data:
-                                await conn.execute(
-                                    "INSERT INTO blocked_users (telegram_id, username, first_name) VALUES ($1, $2, $3) ON CONFLICT (telegram_id) DO NOTHING",
-                                    user_id, user_data['username'], user_data['first_name']
-                                )
-                                await conn.execute(
-                                    "DELETE FROM users WHERE telegram_id = $1",
-                                    user_id
-                                )
-                                results['errors'].append(f"User {user_id} moved to blacklist")
-                            await conn.close()
-                        except Exception as db_error:
-                            print(f"Ошибка БД при добавлении в ЧС: {db_error}")
-                    else:
-                        results['failed'] += 1
-                        results['errors'].append(f"User {user_id}: {response.status_code}")
-                        
-            except Exception as e:
-                results['failed'] += 1
-                results['errors'].append(f"User {user_id}: {str(e)[:50]}")
-            
-            # Обновляем прогресс
-            if progress_id and (i % 5 == 0 or i == len(user_ids) - 1):
-                broadcast_progress[progress_id] = {
-                    'total': len(user_ids),
-                    'sent': results['sent'],
-                    'failed': results['failed'],
-                    'blocked': results['blocked'],
-                    'processed': i + 1
-                }
-            
-            if i % 30 == 0:
-                await asyncio.sleep(0.1)
-    
-    if progress_id:
-        broadcast_progress[progress_id] = {
-            'total': len(user_ids),
-            'sent': results['sent'],
-            'failed': results['failed'],
-            'blocked': results['blocked'],
-            'processed': len(user_ids),
-            'finished': True
-        }
-    
-    return results
 
 # ===================== МАРШРУТЫ =====================
 
@@ -445,62 +537,98 @@ async def broadcast_page(request: Request):
     conn = await get_db()
     try:
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
+        job_id = request.query_params.get("job")
+        job_data = None
         
-        result_id = request.query_params.get("result")
-        progress_id = request.query_params.get("progress")
+        if job_id:
+            try:
+                job_id = int(job_id)
+                job_data = await get_job_status(job_id)
+            except:
+                pass
+        
         result_html = ""
         
-        if result_id and result_id in broadcast_results:
-            results = broadcast_results.pop(result_id)
-            status_color = "#00ffcc" if results['failed'] == 0 else "#ff8844"
-            result_html = f'''
-            <div class="result-box" style="border-color: {status_color}44; margin-top: 20px;">
-                <h2 style="color: {status_color};">{'✅ Рассылка завершена!' if results['failed'] == 0 else '⚠️ Рассылка завершена с ошибками'}</h2>
-                <div class="result-stats">
-                    <div><div class="number">{results['total']}</div><div class="label">Всего</div></div>
-                    <div><div class="number" style="color: #00ffcc;">{results['sent']}</div><div class="label">✅ Доставлено</div></div>
-                    <div><div class="number" style="color: #ff4488;">{results['failed']}</div><div class="label">❌ Ошибок</div></div>
-                    <div><div class="number" style="color: #ffaa44;">{results['blocked']}</div><div class="label">🚫 В ЧС</div></div>
-                </div>
-                <div class="result-message">
-                    <p style="color: #8899aa; font-size: 13px; margin-bottom: 5px;">📝 Текст:</p>
-                    <p style="color: #cdd6f4;">{results['text']}</p>
-                </div>
-                <a href="/broadcast" class="glow-button">⬅️ Новая рассылка</a>
-            </div>
-            '''
-        elif progress_id and progress_id in broadcast_progress:
-            prog = broadcast_progress[progress_id]
-            percent = int((prog['processed'] / prog['total']) * 100) if prog['total'] > 0 else 0
+        if job_data:
+            total = job_data['total_users'] or 0
+            sent = job_data['sent_users'] or 0
+            failed = job_data['failed_users'] or 0
+            blocked = job_data['blocked_users'] or 0
+            progress = job_data['progress'] or 0
+            remaining = total - sent - failed - blocked
+            
+            status_text = job_data['status']
+            status_class = f"status-{status_text}"
+            status_labels = {
+                'pending': '⏳ Ожидание',
+                'running': '🔄 Выполняется',
+                'paused': '⏸️ Приостановлено',
+                'completed': '✅ Завершено',
+                'failed': '❌ Ошибка'
+            }
+            status_label = status_labels.get(status_text, status_text)
+            
             result_html = f'''
             <div class="result-box" style="border-color: #00ffcc44; margin-top: 20px;">
-                <h2 style="color: #00ffcc;">⏳ Рассылка в процессе...</h2>
+                <h2 style="color: #00ffcc;">📊 Статистика рассылки - {status_label}</h2>
                 <div class="result-stats">
-                    <div><div class="number">{prog['processed']}/{prog['total']}</div><div class="label">Обработано</div></div>
-                    <div><div class="number" style="color: #00ffcc;">{prog['sent']}</div><div class="label">✅ Доставлено</div></div>
-                    <div><div class="number" style="color: #ff4488;">{prog['failed']}</div><div class="label">❌ Ошибок</div></div>
-                    <div><div class="number" style="color: #ffaa44;">{prog['blocked']}</div><div class="label">🚫 В ЧС</div></div>
+                    <div><div class="number">{total}</div><div class="label">Всего пользователей</div></div>
+                    <div><div class="number" style="color: #00ffcc;">{sent}</div><div class="label">Успешно отправлено<br><span style="font-size:11px; color:#8899aa;">{f"{sent/total*100:.1f}%" if total > 0 else "0%"}</span></div></div>
+                    <div><div class="number" style="color: #ff4488;">{failed}</div><div class="label">Ошибок<br><span style="font-size:11px; color:#8899aa;">{f"{failed/total*100:.1f}%" if total > 0 else "0%"}</span></div></div>
+                    <div><div class="number" style="color: #ffaa44;">{remaining}</div><div class="label">Осталось обработать<br><span style="font-size:11px; color:#8899aa;">{f"{remaining/total*100:.1f}%" if total > 0 else "0%"}</span></div></div>
                 </div>
                 <div class="progress-bar">
-                    <div class="progress-fill" style="width:{percent}%;"></div>
+                    <div class="progress-fill" style="width:{progress}%;"></div>
                 </div>
-                <p style="text-align:center; color:#8899aa; font-size:13px;">{percent}% выполнено</p>
-                <a href="/broadcast" class="glow-button" style="margin-top:10px;">⬅️ Назад</a>
+                <p style="text-align:center; color:#8899aa; font-size:13px; margin-bottom:15px;">{progress:.2f}% - Обработано: {sent + failed + blocked} из {total}</p>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+                    <div style="background: #0a0a1a; padding: 15px; border-radius: 8px; border: 1px solid #00ffcc22;">
+                        <h4 style="color: #00ffcc; margin-bottom: 10px; font-size: 14px;">📋 Детали рассылки</h4>
+                        <div class="detail-grid">
+                            <div class="detail-item"><span class="label">Статус</span><span class="value {status_class}">{status_label}</span></div>
+                            <div class="detail-item"><span class="label">Тип сообщения</span><span class="value">Текстовое</span></div>
+                            <div class="detail-item"><span class="label">Прогресс</span><span class="value">{progress:.1f}% ({sent + failed + blocked}/{total})</span></div>
+                            <div class="detail-item"><span class="label">ID очереди</span><span class="value">{job_data['id']}</span></div>
+                        </div>
+                    </div>
+                    <div style="background: #0a0a1a; padding: 15px; border-radius: 8px; border: 1px solid #00ffcc22;">
+                        <h4 style="color: #00ffcc; margin-bottom: 10px; font-size: 14px;">⏱️ Время выполнения</h4>
+                        <div class="detail-grid">
+                            <div class="detail-item"><span class="label">Запущена</span><span class="value">{job_data['started_at'].strftime('%d.%m.%Y, %H:%M:%S') if job_data['started_at'] else '-'}</span></div>
+                            <div class="detail-item"><span class="label">Завершена</span><span class="value">{job_data['finished_at'].strftime('%d.%m.%Y, %H:%M:%S') if job_data['finished_at'] else '-'}</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div style="background: #0a0a1a; padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid #00ffcc22;">
+                    <h4 style="color: #00ffcc; margin-bottom: 10px; font-size: 14px;">💻 Системная информация</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item"><span class="label">Память</span><span class="value">{job_data.get('memory_usage', 0):.1f} MB</span></div>
+                        <div class="detail-item"><span class="label">Пик памяти</span><span class="value">{job_data.get('memory_usage', 0):.1f} MB</span></div>
+                        <div class="detail-item"><span class="label">CPU</span><span class="value">{job_data.get('cpu_usage', 0):.1f}%</span></div>
+                        <div class="detail-item"><span class="label">Активных пользователей</span><span class="value">{total}</span></div>
+                    </div>
+                </div>
+                <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                    <a href="/broadcast" class="glow-button" style="flex:1;">⬅️ Новая рассылка</a>
+                    <a href="/broadcast/list" class="glow-button" style="flex:1; border-color: #4488ff; color: #4488ff;">📋 Все рассылки</a>
+                </div>
             </div>
             '''
         
         content = f'''
         <div class="page-title">📢 Рассылка</div>
         <div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">
-            <div class="stat-card"><span class="icon">👥</span><div class="stat-number">{total_users}</div><div class="stat-label">Получателей</div></div>
+            <div class="stat-card"><span class="icon">👥</span><div class="stat-number">{total_users}</div><div class="stat-label">Всего пользователей</div></div>
         </div>
         <div class="form-container">
             <form action="/broadcast/send" method="post" id="broadcastForm">
                 <label for="message">📝 Текст сообщения (HTML поддерживается):</label>
                 <textarea id="message" name="message" rows="5" placeholder="Введите текст рассылки...&#10;Можно использовать HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;"></textarea>
                 <div class="mt-20" style="display: flex; flex-direction: column; gap: 10px;">
-                    <button type="submit" id="sendBtn">🚀 Отправить рассылку</button>
+                    <button type="submit" id="sendBtn">🚀 Запустить рассылку</button>
                     <span style="color: #8899aa; font-size: 13px; text-align: center;">Будет отправлено <strong style="color: #00ffcc;">{total_users}</strong> пользователям</span>
+                    <span style="color: #ffaa44; font-size: 12px; text-align: center;">⚡ При загрузке CPU > 80% рассылка автоматически приостанавливается</span>
                 </div>
             </form>
         </div>
@@ -509,7 +637,11 @@ async def broadcast_page(request: Request):
             document.getElementById('broadcastForm').addEventListener('submit', function(e) {{
                 var btn = document.getElementById('sendBtn');
                 btn.disabled = true;
-                btn.textContent = '⏳ Отправка...';
+                btn.textContent = '⏳ Запуск...';
+                setTimeout(function() {{
+                    btn.disabled = false;
+                    btn.textContent = '🚀 Запустить рассылку';
+                }}, 3000);
             }});
         </script>
         '''
@@ -526,20 +658,77 @@ async def send_broadcast(request: Request, message: str = Form(...)):
     
     conn = await get_db()
     try:
+        # Фиксируем список пользователей на момент запуска
         rows = await conn.fetch("SELECT telegram_id FROM users")
         user_ids = [row['telegram_id'] for row in rows]
         
-        progress_id = str(uuid.uuid4())[:8]
+        if not user_ids:
+            return RedirectResponse(url="/broadcast?error=no_users", status_code=303)
         
-        # Запускаем рассылку в фоне
-        import threading
+        # Создаём задание в БД
+        job_id = await create_broadcast_job(message, user_ids)
+        
+        # Запускаем рассылку в фоновом потоке
         def run_broadcast():
-            asyncio.run(send_broadcast_message(BOT_TOKEN, user_ids, message, progress_id))
+            asyncio.run(send_broadcast_with_monitoring(job_id, BOT_TOKEN))
         
         thread = threading.Thread(target=run_broadcast)
+        thread.daemon = True
         thread.start()
         
-        return RedirectResponse(url=f"/broadcast?progress={progress_id}", status_code=303)
+        return RedirectResponse(url=f"/broadcast?job={job_id}", status_code=303)
+    finally:
+        await conn.close()
+
+@app.get("/broadcast/list", response_class=HTMLResponse)
+async def broadcast_list():
+    conn = await get_db()
+    try:
+        rows = await conn.fetch("""
+            SELECT * FROM broadcast_jobs 
+            ORDER BY created_at DESC 
+            LIMIT 50
+        """)
+        
+        html = '<div class="page-title">📋 История рассылок</div>'
+        
+        if rows:
+            html += '<div class="table-container"><table><tr><th>ID</th><th>Статус</th><th>Всего</th><th>Отправлено</th><th>Ошибок</th><th>Прогресс</th><th>Создана</th><th>Действие</th></tr>'
+            for row in rows:
+                status_color = {
+                    'pending': '#8899aa',
+                    'running': '#00ffcc',
+                    'paused': '#ffaa44',
+                    'completed': '#44ff88',
+                    'failed': '#ff4488'
+                }.get(row['status'], '#8899aa')
+                
+                status_labels = {
+                    'pending': '⏳ Ожидание',
+                    'running': '🔄 Выполняется',
+                    'paused': '⏸️ Пауза',
+                    'completed': '✅ Завершено',
+                    'failed': '❌ Ошибка'
+                }.get(row['status'], row['status'])
+                
+                html += f'''
+                <tr>
+                    <td>{row['id']}</td>
+                    <td><span style="color:{status_color};">{status_labels}</span></td>
+                    <td>{row['total_users']}</td>
+                    <td>{row['sent_users']}</td>
+                    <td>{row['failed_users']}</td>
+                    <td>{row['progress']:.1f}%</td>
+                    <td>{row['created_at'].strftime('%d.%m.%Y %H:%M') if row['created_at'] else '-'}</td>
+                    <td><a href="/broadcast?job={row['id']}" style="color:#00ffcc;">Подробнее</a></td>
+                </tr>
+                '''
+            html += '</table></div>'
+        else:
+            html += '<div class="empty">😕 Рассылок пока нет</div>'
+        
+        menu = MENU.replace('📢 Рассылка', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📢 Рассылка</span>')
+        return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
     finally:
         await conn.close()
 
