@@ -29,18 +29,23 @@ async def init_pool():
     global pool
     pool = await asyncpg.create_pool(
         DATABASE_URL,
-        min_size=10,
-        max_size=50,
+        min_size=5,
+        max_size=20,
         max_inactive_connection_lifetime=300,
-        command_timeout=10
+        command_timeout=10,
+        timeout=30  # Добавляем таймаут
     )
     print("✅ Пул соединений с БД создан")
 
 async def get_conn():
+    global pool
+    if pool is None:
+        await init_pool()
     return await pool.acquire()
 
 async def release_conn(conn):
-    await pool.release(conn)
+    if conn:
+        await pool.release(conn)
 
 
 def get_user_cached(user_id: int):
