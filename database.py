@@ -3,7 +3,6 @@ import os
 import json
 import redis
 from dotenv import load_dotenv
-from functools import lru_cache
 import time
 
 load_dotenv()
@@ -20,36 +19,49 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+try:
+    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+    redis_client.ping()
+    print("✅ Redis подключен")
+except:
+    print("⚠️ Redis не доступен, работаем без кэша")
+    redis_client = None
 
+# Глобальный пул
 pool = None
-CACHE_TTL = 300  # 5 минут
+CACHE_TTL = 300
 
 async def init_pool():
+    """Инициализирует пул соединений с БД"""
     global pool
-    pool = await asyncpg.create_pool(
-        DATABASE_URL,
-        min_size=5,
-        max_size=20,
-        max_inactive_connection_lifetime=300,
-        command_timeout=10,
-        timeout=30  # Добавляем таймаут
-    )
-    print("✅ Пул соединений с БД создан")
+    if pool is None:
+        pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            min_size=5,
+            max_size=20,
+            max_inactive_connection_lifetime=300,
+            command_timeout=10,
+            timeout=30
+        )
+        print("✅ Пул соединений с БД создан")
+    return pool
 
 async def get_conn():
+    """Получает соединение из пула"""
     global pool
     if pool is None:
         await init_pool()
     return await pool.acquire()
 
 async def release_conn(conn):
+    """Возвращает соединение в пул"""
     if conn:
         await pool.release(conn)
 
 
 def get_user_cached(user_id: int):
-    """Получает пользователя из Redis кэша"""
+    if not redis_client:
+        return None
     key = f"user:{user_id}"
     cached = redis_client.get(key)
     if cached:
@@ -57,26 +69,31 @@ def get_user_cached(user_id: int):
     return None
 
 def set_user_cache(user_id: int, data: dict):
-    """Сохраняет пользователя в Redis кэш"""
+    if not redis_client:
+        return
     key = f"user:{user_id}"
     redis_client.setex(key, CACHE_TTL, json.dumps(data, default=str))
 
 def invalidate_user_cache(user_id: int):
-    """Очищает кэш пользователя"""
+    if not redis_client:
+        return
     redis_client.delete(f"user:{user_id}")
 
 def is_user_blocked_cached(user_id: int):
-    """Проверяет, заблокирован ли пользователь, через Redis"""
+    if not redis_client:
+        return False
     key = f"blocked:{user_id}"
     return redis_client.exists(key) > 0
 
 def set_user_blocked_cache(user_id: int):
-    """Сохраняет в Redis, что пользователь заблокирован"""
+    if not redis_client:
+        return
     key = f"blocked:{user_id}"
     redis_client.setex(key, CACHE_TTL, "1")
 
 def remove_user_blocked_cache(user_id: int):
-    """Удаляет из Redis информацию о блокировке"""
+    if not redis_client:
+        return
     redis_client.delete(f"blocked:{user_id}")
 
 
@@ -248,44 +265,11 @@ async def is_user_blocked(user_id: int):
     finally:
         await release_conn(conn)
 
-async def get_all_users(limit: int = 100, offset: int = 0):
-    conn = await get_conn()
-    try:
-        rows = await conn.fetch(
-            "SELECT telegram_id FROM users ORDER BY registered_at DESC LIMIT $1 OFFSET $2",
-            limit, offset
-        )
-        return [row['telegram_id'] for row in rows]
-    finally:
-        await release_conn(conn)
-
 async def count_users():
     conn = await get_conn()
     try:
         count = await conn.fetchval("SELECT COUNT(*) FROM users")
         return count
-    finally:
-        await release_conn(conn)
-
-async def get_users_batch(limit: int = 1000, offset: int = 0):
-    """Получает пользователей пачками для рассылки"""
-    conn = await get_conn()
-    try:
-        rows = await conn.fetch(
-            "SELECT telegram_id FROM users ORDER BY telegram_id LIMIT $1 OFFSET $2",
-            limit, offset
-        )
-        return [row['telegram_id'] for row in rows]
-    finally:
-        await release_conn(conn)
-
-async def add_subscription(user_id: int, plan: str, end_date):
-    conn = await get_conn()
-    try:
-        await conn.execute(
-            "INSERT INTO subscriptions (user_id, plan, end_date, status) VALUES ($1, $2, $3, 'active')",
-            user_id, plan, end_date
-        )
     finally:
         await release_conn(conn)
 
@@ -310,5 +294,37 @@ async def get_all_subscriptions(limit: int = 100, offset: int = 0):
             LIMIT $1 OFFSET $2
         """, limit, offset)
         return [dict(row) for row in rows]
+    finally:
+        await release_conn(conn)
+
+async def get_all_users(limit: int = 100, offset: int = 0):
+    conn = await get_conn()
+    try:
+        rows = await conn.fetch(
+            "SELECT telegram_id FROM users ORDER BY registered_at DESC LIMIT $1 OFFSET $2",
+            limit, offset
+        )
+        return [row['telegram_id'] for row in rows]
+    finally:
+        await release_conn(conn)
+
+async def get_users_batch(limit: int = 1000, offset: int = 0):
+    conn = await get_conn()
+    try:
+        rows = await conn.fetch(
+            "SELECT telegram_id FROM users ORDER BY telegram_id LIMIT $1 OFFSET $2",
+            limit, offset
+        )
+        return [row['telegram_id'] for row in rows]
+    finally:
+        await release_conn(conn)
+
+async def add_subscription(user_id: int, plan: str, end_date):
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            "INSERT INTO subscriptions (user_id, plan, end_date, status) VALUES ($1, $2, $3, 'active')",
+            user_id, plan, end_date
+        )
     finally:
         await release_conn(conn)
