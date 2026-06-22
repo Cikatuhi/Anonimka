@@ -3,7 +3,7 @@ import logging
 import os
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler, AIORateLimiter
 import database
 
 load_dotenv()
@@ -13,6 +13,7 @@ logging.basicConfig(level=logging.INFO)
 
 active_sessions = {}
 reply_sessions = {}
+MAX_SESSIONS = 1000
 
 ADMIN_ID = 7683869901
 
@@ -41,7 +42,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             active_sessions[user_id] = {
                 'recipient_id': recipient_id,
-                'recipient_name': recipient_name
+                'recipient_name': recipient_name,
+                'created_at': asyncio.get_event_loop().time()
             }
 
             keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
@@ -551,9 +553,21 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 def main():
+    import database
+    asyncio.run(database.init_pool())
     asyncio.run(database.init_db())
 
-    app = Application.builder().token(TOKEN).build()
+    app = Application.builder() \
+        .token(TOKEN) \
+        .rate_limiter(
+            AIORateLimiter(
+                overall_max_rate=30,
+                overall_time_period=1,
+                group_max_rate=20,
+                group_time_period=60
+            )
+        ) \
+        .build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("info", info_command))
