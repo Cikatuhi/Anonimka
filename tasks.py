@@ -1,36 +1,14 @@
 import asyncio
 import json
 import os
-from wakaq import WakaQ, task
 import httpx
 import psutil
-from dotenv import load_dotenv
-
-load_dotenv()
+from datetime import datetime
+import database
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-REDIS_DB = int(os.getenv("REDIS_DB", 0))
-
-wakaq = WakaQ(
-    queues=[
-        (0, 'high-priority'),
-        (1, 'medium-priority'),
-        'low-priority',
-    ],
-    concurrency="cores*4",
-    soft_timeout=3600,
-    hard_timeout=7200,
-    max_retries=3,
-    redis_host=REDIS_HOST,
-    redis_port=REDIS_PORT,
-    redis_db=REDIS_DB,
-)
-
 async def update_job_status(job_id: int, status: str, **kwargs):
-    import database
     conn = await database.get_conn()
     try:
         fields = []
@@ -53,11 +31,6 @@ def get_cpu_usage():
 def get_memory_usage():
     return psutil.virtual_memory().percent
 
-@wakaq.task(queue='medium-priority', max_retries=3)
-async def broadcast_task(user_ids_json: str, message: str, job_id: int):
-    """Задача для рассылки - выполняется в воркере"""
-    await send_broadcast_with_monitoring(user_ids_json, message, job_id)
-
 async def send_broadcast_with_monitoring(user_ids_json: str, message: str, job_id: int):
     """Отправляет рассылку с мониторингом"""
     user_ids = json.loads(user_ids_json)
@@ -79,7 +52,7 @@ async def send_broadcast_with_monitoring(user_ids_json: str, message: str, job_i
     
     message_text = f"✉️ Вам пришло анонимное сообщение:\n\n{message}"
     
-    await update_job_status(job_id, 'running', started_at=asyncio.get_event_loop().time())
+    await update_job_status(job_id, 'running', started_at=datetime.now())
     
     async with httpx.AsyncClient(timeout=30.0) as client:
         for i, user_id in enumerate(user_ids):
@@ -89,7 +62,7 @@ async def send_broadcast_with_monitoring(user_ids_json: str, message: str, job_i
                 await update_job_status(job_id, 'running', cpu_usage=cpu, memory_usage=memory)
                 
                 if cpu > 80:
-                    await update_job_status(job_id, 'paused', paused_at=asyncio.get_event_loop().time())
+                    await update_job_status(job_id, 'paused', paused_at=datetime.now())
                     while get_cpu_usage() > 60:
                         await asyncio.sleep(5)
                     await update_job_status(job_id, 'running')
@@ -115,7 +88,6 @@ async def send_broadcast_with_monitoring(user_ids_json: str, message: str, job_i
                         "bot was kicked", "chat not found", "can't send messages to user"
                     ]):
                         results['blocked'] += 1
-                        import database
                         user_data = await database.get_user(user_id)
                         if user_data:
                             await database.add_blocked_user(
@@ -150,5 +122,5 @@ async def send_broadcast_with_monitoring(user_ids_json: str, message: str, job_i
         failed_users=results['failed'],
         blocked_users=results['blocked'],
         progress=100,
-        finished_at=asyncio.get_event_loop().time()
+        finished_at=datetime.now()
     )
