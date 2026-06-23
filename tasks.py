@@ -1,16 +1,14 @@
 import asyncio
 import json
 import os
-from wakaq import WakaQ, Queue, task
-from datetime import timedelta
-from dotenv import load_dotenv
+from wakaq import WakaQ, task
 import httpx
 import psutil
+from dotenv import load_dotenv
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 7683869901
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
@@ -26,19 +24,14 @@ wakaq = WakaQ(
     soft_timeout=3600,
     hard_timeout=7200,
     max_retries=3,
+    redis_host=REDIS_HOST,
+    redis_port=REDIS_PORT,
+    redis_db=REDIS_DB,
 )
-
-async def get_db():
-    import database
-    return await database.get_conn()
-
-async def release_db(conn):
-    import database
-    await database.release_conn(conn)
 
 async def update_job_status(job_id: int, status: str, **kwargs):
     import database
-    conn = await get_db()
+    conn = await database.get_conn()
     try:
         fields = []
         values = []
@@ -52,7 +45,7 @@ async def update_job_status(job_id: int, status: str, **kwargs):
         else:
             await conn.execute("UPDATE broadcast_jobs SET status = $1 WHERE id = $2", status, job_id)
     finally:
-        await release_db(conn)
+        await database.release_conn(conn)
 
 def get_cpu_usage():
     return psutil.cpu_percent(interval=0.5)
@@ -61,10 +54,9 @@ def get_memory_usage():
     return psutil.virtual_memory().percent
 
 @wakaq.task(queue='medium-priority', max_retries=3)
-def broadcast_task(user_ids_json: str, message: str, job_id: int):
+async def broadcast_task(user_ids_json: str, message: str, job_id: int):
     """Задача для рассылки - выполняется в воркере"""
-    import asyncio
-    asyncio.run(send_broadcast_with_monitoring(user_ids_json, message, job_id))
+    await send_broadcast_with_monitoring(user_ids_json, message, job_id)
 
 async def send_broadcast_with_monitoring(user_ids_json: str, message: str, job_id: int):
     """Отправляет рассылку с мониторингом"""
@@ -91,7 +83,6 @@ async def send_broadcast_with_monitoring(user_ids_json: str, message: str, job_i
     
     async with httpx.AsyncClient(timeout=30.0) as client:
         for i, user_id in enumerate(user_ids):
-            # Проверяем нагрузку CPU каждые 10 сообщений
             if i % 10 == 0 and i > 0:
                 cpu = get_cpu_usage()
                 memory = get_memory_usage()
@@ -140,7 +131,6 @@ async def send_broadcast_with_monitoring(user_ids_json: str, message: str, job_i
                 results['failed'] += 1
                 results['errors'].append(f"User {user_id}: {str(e)[:50]}")
             
-            # Обновляем прогресс каждые 50 сообщений
             if i % 50 == 0 or i == total - 1:
                 progress = ((i + 1) / total) * 100 if total > 0 else 0
                 await update_job_status(
@@ -154,7 +144,6 @@ async def send_broadcast_with_monitoring(user_ids_json: str, message: str, job_i
             if i % 30 == 0:
                 await asyncio.sleep(0.1)
     
-    # Завершаем задание
     await update_job_status(
         job_id, 'completed',
         sent_users=results['sent'],
