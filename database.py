@@ -1,9 +1,7 @@
 import asyncpg
 import os
-import json
-import redis
 from dotenv import load_dotenv
-import time
+import asyncio
 
 load_dotenv()
 
@@ -15,24 +13,11 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-REDIS_DB = int(os.getenv("REDIS_DB", 0))
-
-try:
-    redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
-    redis_client.ping()
-    print("✅ Redis подключен")
-except:
-    print("⚠️ Redis не доступен, работаем без кэша")
-    redis_client = None
-
 # Глобальный пул
 pool = None
-CACHE_TTL = 300
+USE_POOL = os.getenv("USE_POOL", "false").lower() == "true"
 
 async def init_pool():
-    """Инициализирует пул соединений с БД"""
     global pool
     if pool is None:
         pool = await asyncpg.create_pool(
@@ -47,55 +32,19 @@ async def init_pool():
     return pool
 
 async def get_conn():
-    """Получает соединение из пула"""
     global pool
-    if pool is None:
-        await init_pool()
-    return await pool.acquire()
+    if USE_POOL:
+        if pool is None:
+            await init_pool()
+        return await pool.acquire()
+    else:
+        return await asyncpg.connect(DATABASE_URL)
 
 async def release_conn(conn):
-    """Возвращает соединение в пул"""
-    if conn:
+    if USE_POOL and pool:
         await pool.release(conn)
-
-
-def get_user_cached(user_id: int):
-    if not redis_client:
-        return None
-    key = f"user:{user_id}"
-    cached = redis_client.get(key)
-    if cached:
-        return json.loads(cached)
-    return None
-
-def set_user_cache(user_id: int, data: dict):
-    if not redis_client:
-        return
-    key = f"user:{user_id}"
-    redis_client.setex(key, CACHE_TTL, json.dumps(data, default=str))
-
-def invalidate_user_cache(user_id: int):
-    if not redis_client:
-        return
-    redis_client.delete(f"user:{user_id}")
-
-def is_user_blocked_cached(user_id: int):
-    if not redis_client:
-        return False
-    key = f"blocked:{user_id}"
-    return redis_client.exists(key) > 0
-
-def set_user_blocked_cache(user_id: int):
-    if not redis_client:
-        return
-    key = f"blocked:{user_id}"
-    redis_client.setex(key, CACHE_TTL, "1")
-
-def remove_user_blocked_cache(user_id: int):
-    if not redis_client:
-        return
-    redis_client.delete(f"blocked:{user_id}")
-
+    else:
+        await conn.close()
 
 async def init_db():
     conn = await get_conn()
@@ -175,28 +124,19 @@ async def register_user(user_id: int, username: str, first_name: str):
                 "INSERT INTO users (telegram_id, username, first_name) VALUES ($1, $2, $3)",
                 user_id, username, first_name
             )
-            invalidate_user_cache(user_id)
-            remove_user_blocked_cache(user_id)
             return True
         return False
     finally:
         await release_conn(conn)
 
 async def get_user(user_id: int):
-    cached = get_user_cached(user_id)
-    if cached:
-        return cached
-    
     conn = await get_conn()
     try:
         row = await conn.fetchrow(
             "SELECT * FROM users WHERE telegram_id = $1",
             user_id
         )
-        data = dict(row) if row else None
-        if data:
-            set_user_cache(user_id, data)
-        return data
+        return dict(row) if row else None
     finally:
         await release_conn(conn)
 
@@ -221,8 +161,6 @@ async def add_blocked_user(user_id: int, username: str, first_name: str):
             "DELETE FROM users WHERE telegram_id = $1",
             user_id
         )
-        invalidate_user_cache(user_id)
-        set_user_blocked_cache(user_id)
     finally:
         await release_conn(conn)
 
@@ -242,44 +180,35 @@ async def remove_blocked_user(user_id: int):
                 "DELETE FROM blocked_users WHERE telegram_id = $1",
                 user_id
             )
-            invalidate_user_cache(user_id)
-            remove_user_blocked_cache(user_id)
             return True
         return False
     finally:
         await release_conn(conn)
 
 async def is_user_blocked(user_id: int):
-    if is_user_blocked_cached(user_id):
-        return True
     conn = await get_conn()
     try:
         row = await conn.fetchrow(
             "SELECT telegram_id FROM blocked_users WHERE telegram_id = $1",
             user_id
         )
-        if row:
-            set_user_blocked_cache(user_id)
-            return True
-        return False
+        return row is not None
     finally:
         await release_conn(conn)
 
 async def count_users():
     conn = await get_conn()
     try:
-        count = await conn.fetchval("SELECT COUNT(*) FROM users")
-        return count
+        return await conn.fetchval("SELECT COUNT(*) FROM users")
     finally:
         await release_conn(conn)
 
 async def count_active_subscriptions():
     conn = await get_conn()
     try:
-        count = await conn.fetchval(
+        return await conn.fetchval(
             "SELECT COUNT(*) FROM subscriptions WHERE status = 'active' AND (end_date IS NULL OR end_date > NOW())"
         )
-        return count
     finally:
         await release_conn(conn)
 
@@ -297,17 +226,6 @@ async def get_all_subscriptions(limit: int = 100, offset: int = 0):
     finally:
         await release_conn(conn)
 
-async def get_all_users(limit: int = 100, offset: int = 0):
-    conn = await get_conn()
-    try:
-        rows = await conn.fetch(
-            "SELECT telegram_id FROM users ORDER BY registered_at DESC LIMIT $1 OFFSET $2",
-            limit, offset
-        )
-        return [row['telegram_id'] for row in rows]
-    finally:
-        await release_conn(conn)
-
 async def get_users_batch(limit: int = 1000, offset: int = 0):
     conn = await get_conn()
     try:
@@ -319,12 +237,13 @@ async def get_users_batch(limit: int = 1000, offset: int = 0):
     finally:
         await release_conn(conn)
 
-async def add_subscription(user_id: int, plan: str, end_date):
+async def get_all_users(limit: int = 100, offset: int = 0):
     conn = await get_conn()
     try:
-        await conn.execute(
-            "INSERT INTO subscriptions (user_id, plan, end_date, status) VALUES ($1, $2, $3, 'active')",
-            user_id, plan, end_date
+        rows = await conn.fetch(
+            "SELECT telegram_id FROM users ORDER BY registered_at DESC LIMIT $1 OFFSET $2",
+            limit, offset
         )
+        return [row['telegram_id'] for row in rows]
     finally:
         await release_conn(conn)
