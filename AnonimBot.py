@@ -553,21 +553,13 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 def main():
+    import asyncio
     import database
+    
     asyncio.run(database.init_pool())
     asyncio.run(database.init_db())
 
-    app = Application.builder() \
-        .token(TOKEN) \
-        .rate_limiter(
-            AIORateLimiter(
-                overall_max_rate=30,
-                overall_time_period=1,
-                group_max_rate=20,
-                group_time_period=60
-            )
-        ) \
-        .build()
+    app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("info", info_command))
