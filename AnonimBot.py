@@ -520,7 +520,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     user_id = query.from_user.id
-    payment_link = f"https://ваш-сайт.ру/{user_id}"
+    payment_link = f"https://anonimka.ru/{user_id}"
 
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
