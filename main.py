@@ -1,16 +1,13 @@
+cat > /root/admin-panel/main.py << 'EOF'
 import os
-import asyncio
 import uuid
 import json
 import psutil
-import threading
 from datetime import datetime
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-import asyncpg
 from dotenv import load_dotenv
 import database
-from tasks import broadcast_task
 
 load_dotenv()
 
@@ -26,37 +23,6 @@ DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NA
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 7683869901
-
-# ===================== ФУНКЦИИ ДЛЯ БД =====================
-
-async def get_db():
-    return await database.get_conn()
-
-async def release_db(conn):
-    await database.release_conn(conn)
-
-async def table_exists(conn, table_name):
-    result = await conn.fetchval(
-        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = $1)",
-        table_name
-    )
-    return result
-
-async def get_job_status(job_id: int):
-    conn = await get_db()
-    try:
-        row = await conn.fetchrow("SELECT * FROM broadcast_jobs WHERE id = $1", job_id)
-        return dict(row) if row else None
-    finally:
-        await release_db(conn)
-
-async def count_users():
-    conn = await get_db()
-    try:
-        count = await conn.fetchval("SELECT COUNT(*) FROM users")
-        return count
-    finally:
-        await release_db(conn)
 
 # ===================== HTML ШАБЛОНЫ =====================
 
@@ -296,12 +262,41 @@ BASE_HTML = '''
 </html>
 '''
 
+def get_badge_class(content_type):
+    types = {
+        'text': 'text',
+        'photo': 'photo',
+        'video': 'video',
+        'voice': 'voice',
+        'sticker': 'sticker',
+        'video_note': 'video_note'
+    }
+    return types.get(content_type, 'text')
+
+# ===================== ФУНКЦИИ ДЛЯ БД =====================
+
+async def get_job_status(job_id: int):
+    async with database.pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM broadcast_jobs WHERE id = $1", job_id)
+        return dict(row) if row else None
+
+async def count_users():
+    async with database.pool.acquire() as conn:
+        count = await conn.fetchval("SELECT COUNT(*) FROM users")
+        return count
+
+async def table_exists(conn, table_name):
+    result = await conn.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = $1)",
+        table_name
+    )
+    return result
+
 # ===================== МАРШРУТЫ =====================
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
-    conn = await get_db()
-    try:
+    async with database.pool.acquire() as conn:
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
         total_messages = await conn.fetchval("SELECT COUNT(*) FROM messages") if await table_exists(conn, "messages") else 0
         total_subscriptions = await database.count_active_subscriptions()
@@ -322,8 +317,6 @@ async def dashboard():
         menu = MENU.replace('📊 Дашборд', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📊 Дашборд</span>')
         html = BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', content)
         return HTMLResponse(content=html)
-    finally:
-        await release_db(conn)
 
 @app.get("/broadcast/status/{job_id}")
 async def get_broadcast_status(job_id: int):
@@ -376,150 +369,141 @@ async def monitoring_page():
 
 @app.get("/broadcast", response_class=HTMLResponse)
 async def broadcast_page(request: Request):
-    conn = await get_db()
-    try:
-        total_users = await count_users()
-        job_id = request.query_params.get("job")
-        job_data = None
+    total_users = await count_users()
+    job_id = request.query_params.get("job")
+    job_data = None
+    
+    if job_id:
+        try:
+            job_id = int(job_id)
+            job_data = await get_job_status(job_id)
+        except:
+            pass
+    
+    result_html = ""
+    
+    if job_data:
+        total = job_data['total_users'] or 0
+        sent = job_data['sent_users'] or 0
+        failed = job_data['failed_users'] or 0
+        blocked = job_data['blocked_users'] or 0
+        progress = job_data['progress'] or 0
+        processed = sent + failed + blocked
+        remaining = max(0, total - processed)
         
-        if job_id:
-            try:
-                job_id = int(job_id)
-                job_data = await get_job_status(job_id)
-            except:
-                pass
+        status_text = job_data['status']
+        status_class = f"status-{status_text}"
+        status_labels = {
+            'pending': '⏳ Ожидание',
+            'running': '🔄 Выполняется',
+            'paused': '⏸️ Приостановлено',
+            'completed': '✅ Завершено',
+            'failed': '❌ Ошибка'
+        }
+        status_label = status_labels.get(status_text, status_text)
         
-        result_html = ""
-        
-        if job_data:
-            total = job_data['total_users'] or 0
-            sent = job_data['sent_users'] or 0
-            failed = job_data['failed_users'] or 0
-            blocked = job_data['blocked_users'] or 0
-            progress = job_data['progress'] or 0
-            processed = sent + failed + blocked
-            remaining = max(0, total - processed)
+        result_html = f'''
+        <div class="result-box" style="border-color: #00ffcc44; margin-top: 20px;" id="broadcast-stats">
+            <h2 style="color: #00ffcc;">📊 Статистика рассылки - <span class="status-value {status_class}">{status_label}</span></h2>
+            <div class="result-stats">
+                <div class="stat-total"><div class="number">{total}</div><div class="label">Всего пользователей</div></div>
+                <div class="stat-sent"><div class="number" style="color: #00ffcc;">{sent}</div><div class="label">✅ Успешно отправлено<br><span class="percent" style="font-size:11px; color:#8899aa;">{f"{sent/total*100:.1f}%" if total > 0 else "0%"}</span></div></div>
+                <div class="stat-failed"><div class="number" style="color: #ff4488;">{failed}</div><div class="label">❌ Ошибок<br><span class="percent" style="font-size:11px; color:#8899aa;">{f"{failed/total*100:.1f}%" if total > 0 else "0%"}</span></div></div>
+                <div class="stat-remaining"><div class="number" style="color: #ffaa44;">{remaining}</div><div class="label">⏳ Осталось обработать<br><span class="percent" style="font-size:11px; color:#8899aa;">{f"{remaining/total*100:.1f}%" if total > 0 else "0%"}</span></div></div>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width:{min(progress, 100)}%;"></div>
+            </div>
+            <p class="progress-text" style="text-align:center; color:#8899aa; font-size:13px; margin-bottom:15px;">{progress:.2f}% - Обработано: {processed} из {total}</p>
             
-            status_text = job_data['status']
-            status_class = f"status-{status_text}"
-            status_labels = {
-                'pending': '⏳ Ожидание',
-                'running': '🔄 Выполняется',
-                'paused': '⏸️ Приостановлено',
-                'completed': '✅ Завершено',
-                'failed': '❌ Ошибка'
-            }
-            status_label = status_labels.get(status_text, status_text)
-            
-            result_html = f'''
-            <div class="result-box" style="border-color: #00ffcc44; margin-top: 20px;" id="broadcast-stats">
-                <h2 style="color: #00ffcc;">📊 Статистика рассылки - <span class="status-value {status_class}">{status_label}</span></h2>
-                <div class="result-stats">
-                    <div class="stat-total"><div class="number">{total}</div><div class="label">Всего пользователей</div></div>
-                    <div class="stat-sent"><div class="number" style="color: #00ffcc;">{sent}</div><div class="label">✅ Успешно отправлено<br><span class="percent" style="font-size:11px; color:#8899aa;">{f"{sent/total*100:.1f}%" if total > 0 else "0%"}</span></div></div>
-                    <div class="stat-failed"><div class="number" style="color: #ff4488;">{failed}</div><div class="label">❌ Ошибок<br><span class="percent" style="font-size:11px; color:#8899aa;">{f"{failed/total*100:.1f}%" if total > 0 else "0%"}</span></div></div>
-                    <div class="stat-remaining"><div class="number" style="color: #ffaa44;">{remaining}</div><div class="label">⏳ Осталось обработать<br><span class="percent" style="font-size:11px; color:#8899aa;">{f"{remaining/total*100:.1f}%" if total > 0 else "0%"}</span></div></div>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width:{min(progress, 100)}%;"></div>
-                </div>
-                <p class="progress-text" style="text-align:center; color:#8899aa; font-size:13px; margin-bottom:15px;">{progress:.2f}% - Обработано: {processed} из {total}</p>
-                
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
-                    <div style="background: #0a0a1a; padding: 15px; border-radius: 8px; border: 1px solid #00ffcc22;">
-                        <h4 style="color: #00ffcc; margin-bottom: 10px; font-size: 14px;">📋 Детали рассылки</h4>
-                        <div class="detail-grid">
-                            <div class="detail-item"><span class="label">Статус</span><span class="value status-value {status_class}">{status_label}</span></div>
-                            <div class="detail-item"><span class="label">Тип сообщения</span><span class="value">Текстовое</span></div>
-                            <div class="detail-item detail-progress"><span class="label">Прогресс</span><span class="value">{progress:.1f}% ({processed}/{total})</span></div>
-                            <div class="detail-item"><span class="label">ID очереди</span><span class="value">{job_data['id']}</span></div>
-                        </div>
-                    </div>
-                    <div style="background: #0a0a1a; padding: 15px; border-radius: 8px; border: 1px solid #00ffcc22;">
-                        <h4 style="color: #00ffcc; margin-bottom: 10px; font-size: 14px;">⏱️ Время выполнения</h4>
-                        <div class="detail-grid">
-                            <div class="detail-item"><span class="label">Запущена</span><span class="value">{job_data['started_at'].strftime('%d.%m.%Y, %H:%M:%S') if job_data['started_at'] else '-'}</span></div>
-                            <div class="detail-item"><span class="label">Завершена</span><span class="value">{job_data['finished_at'].strftime('%d.%m.%Y, %H:%M:%S') if job_data['finished_at'] else '-'}</span></div>
-                        </div>
-                    </div>
-                </div>
-                <div style="background: #0a0a1a; padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid #00ffcc22;">
-                    <h4 style="color: #00ffcc; margin-bottom: 10px; font-size: 14px;">💻 Системная информация</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+                <div style="background: #0a0a1a; padding: 15px; border-radius: 8px; border: 1px solid #00ffcc22;">
+                    <h4 style="color: #00ffcc; margin-bottom: 10px; font-size: 14px;">📋 Детали рассылки</h4>
                     <div class="detail-grid">
-                        <div class="detail-item"><span class="label">Память</span><span class="value">{job_data.get('memory_usage', 0):.1f} MB</span></div>
-                        <div class="detail-item"><span class="label">CPU</span><span class="value">{job_data.get('cpu_usage', 0):.1f}%</span></div>
-                        <div class="detail-item"><span class="label">Активных пользователей</span><span class="value">{total}</span></div>
+                        <div class="detail-item"><span class="label">Статус</span><span class="value status-value {status_class}">{status_label}</span></div>
+                        <div class="detail-item"><span class="label">Тип сообщения</span><span class="value">Текстовое</span></div>
+                        <div class="detail-item detail-progress"><span class="label">Прогресс</span><span class="value">{progress:.1f}% ({processed}/{total})</span></div>
+                        <div class="detail-item"><span class="label">ID очереди</span><span class="value">{job_data['id']}</span></div>
                     </div>
                 </div>
-                <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
-                    <a href="/broadcast" class="glow-button" style="flex:1;">⬅️ Новая рассылка</a>
-                    <a href="/broadcast/list" class="glow-button" style="flex:1; border-color: #4488ff; color: #4488ff;">📋 Все рассылки</a>
+                <div style="background: #0a0a1a; padding: 15px; border-radius: 8px; border: 1px solid #00ffcc22;">
+                    <h4 style="color: #00ffcc; margin-bottom: 10px; font-size: 14px;">⏱️ Время выполнения</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item"><span class="label">Запущена</span><span class="value">{job_data['started_at'].strftime('%d.%m.%Y, %H:%M:%S') if job_data['started_at'] else '-'}</span></div>
+                        <div class="detail-item"><span class="label">Завершена</span><span class="value">{job_data['finished_at'].strftime('%d.%m.%Y, %H:%M:%S') if job_data['finished_at'] else '-'}</span></div>
+                    </div>
                 </div>
             </div>
-            '''
-        
-        content = f'''
-        <div class="page-title">📢 Рассылка</div>
-        <div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">
-            <div class="stat-card"><span class="icon">👥</span><div class="stat-number">{total_users}</div><div class="stat-label">Всего пользователей</div></div>
-        </div>
-        <div class="form-container">
-            <form action="/broadcast/send" method="post" id="broadcastForm">
-                <label for="message">📝 Текст сообщения (HTML поддерживается):</label>
-                <textarea id="message" name="message" rows="5" placeholder="Введите текст рассылки...&#10;Можно использовать HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;"></textarea>
-                <div class="mt-20" style="display: flex; flex-direction: column; gap: 10px;">
-                    <button type="submit" id="sendBtn">🚀 Запустить рассылку</button>
-                    <span style="color: #8899aa; font-size: 13px; text-align: center;">Будет отправлено <strong style="color: #00ffcc;">{total_users}</strong> пользователям</span>
-                    <span style="color: #ffaa44; font-size: 12px; text-align: center;">⚡ При загрузке CPU > 80% рассылка автоматически приостанавливается</span>
+            <div style="background: #0a0a1a; padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid #00ffcc22;">
+                <h4 style="color: #00ffcc; margin-bottom: 10px; font-size: 14px;">💻 Системная информация</h4>
+                <div class="detail-grid">
+                    <div class="detail-item"><span class="label">Память</span><span class="value">{job_data.get('memory_usage', 0):.1f} MB</span></div>
+                    <div class="detail-item"><span class="label">CPU</span><span class="value">{job_data.get('cpu_usage', 0):.1f}%</span></div>
+                    <div class="detail-item"><span class="label">Активных пользователей</span><span class="value">{total}</span></div>
                 </div>
-            </form>
+            </div>
+            <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <a href="/broadcast" class="glow-button" style="flex:1;">⬅️ Новая рассылка</a>
+                <a href="/broadcast/list" class="glow-button" style="flex:1; border-color: #4488ff; color: #4488ff;">📋 Все рассылки</a>
+            </div>
         </div>
-        {result_html}
-        <script>
-            document.getElementById('broadcastForm').addEventListener('submit', function(e) {{
-                var btn = document.getElementById('sendBtn');
-                btn.disabled = true;
-                btn.textContent = '⏳ Запуск...';
-            }});
-        </script>
         '''
-        
-        menu = MENU.replace('📢 Рассылка', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📢 Рассылка</span>')
-        html = BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', content)
-        return HTMLResponse(content=html)
-    finally:
-        await release_db(conn)
+    
+    content = f'''
+    <div class="page-title">📢 Рассылка</div>
+    <div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">
+        <div class="stat-card"><span class="icon">👥</span><div class="stat-number">{total_users}</div><div class="stat-label">Всего пользователей</div></div>
+    </div>
+    <div class="form-container">
+        <form action="/broadcast/send" method="post" id="broadcastForm">
+            <label for="message">📝 Текст сообщения (HTML поддерживается):</label>
+            <textarea id="message" name="message" rows="5" placeholder="Введите текст рассылки...&#10;Можно использовать HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;"></textarea>
+            <div class="mt-20" style="display: flex; flex-direction: column; gap: 10px;">
+                <button type="submit" id="sendBtn">🚀 Запустить рассылку</button>
+                <span style="color: #8899aa; font-size: 13px; text-align: center;">Будет отправлено <strong style="color: #00ffcc;">{total_users}</strong> пользователям</span>
+                <span style="color: #ffaa44; font-size: 12px; text-align: center;">⚡ При загрузке CPU > 80% рассылка автоматически приостанавливается</span>
+            </div>
+        </form>
+    </div>
+    {result_html}
+    <script>
+        document.getElementById('broadcastForm').addEventListener('submit', function(e) {{
+            var btn = document.getElementById('sendBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Запуск...';
+        }});
+    </script>
+    '''
+    
+    menu = MENU.replace('📢 Рассылка', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📢 Рассылка</span>')
+    html = BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', content)
+    return HTMLResponse(content=html)
 
 @app.post("/broadcast/send")
 async def send_broadcast(request: Request, message: str = Form(...)):
     if not message or len(message.strip()) == 0:
         return RedirectResponse(url="/broadcast?error=empty", status_code=303)
     
-    conn = await get_db()
-    try:
+    async with database.pool.acquire() as conn:
         rows = await conn.fetch("SELECT telegram_id FROM users")
         user_ids = [row['telegram_id'] for row in rows]
         
         if not user_ids:
             return RedirectResponse(url="/broadcast?error=no_users", status_code=303)
         
+        # Вставляем задачу и получаем её ID
         job_id = await conn.fetchval("""
             INSERT INTO broadcast_jobs (message, total_users, user_ids_json, status, created_at)
             VALUES ($1, $2, $3::jsonb, 'pending', NOW())
             RETURNING id
         """, message, len(user_ids), json.dumps(user_ids))
         
-        # Запускаем в очередь
-        broadcast_task.delay(json.dumps(user_ids), message, job_id)
-        
+        # Перенаправляем на страницу с этим конкретным заданием
         return RedirectResponse(url=f"/broadcast?job={job_id}", status_code=303)
-    finally:
-        await release_db(conn)
 
 @app.get("/broadcast/list", response_class=HTMLResponse)
 async def broadcast_list():
-    conn = await get_db()
-    try:
+    async with database.pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT * FROM broadcast_jobs 
             ORDER BY created_at DESC 
@@ -566,13 +550,10 @@ async def broadcast_list():
         menu = MENU.replace('📢 Рассылка', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📢 Рассылка</span>')
         html = BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html)
         return HTMLResponse(content=html)
-    finally:
-        await release_db(conn)
 
 @app.get("/users", response_class=HTMLResponse)
 async def users_page():
-    conn = await get_db()
-    try:
+    async with database.pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM users ORDER BY registered_at DESC LIMIT 100")
         total = len(rows)
         
@@ -591,13 +572,10 @@ async def users_page():
         menu = MENU.replace('👥 Пользователи', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">👥 Пользователи</span>')
         html = BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html)
         return HTMLResponse(content=html)
-    finally:
-        await release_db(conn)
 
 @app.get("/messages", response_class=HTMLResponse)
 async def messages_page():
-    conn = await get_db()
-    try:
+    async with database.pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT m.id, m.content, m.content_type, m.created_at,
                    s.first_name as sender_name, s.username as sender_username,
@@ -632,49 +610,42 @@ async def messages_page():
         menu = MENU.replace('💬 Сообщения', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">💬 Сообщения</span>')
         html = BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html)
         return HTMLResponse(content=html)
-    finally:
-        await release_db(conn)
 
 @app.get("/subscriptions", response_class=HTMLResponse)
 async def subscriptions_page():
-    conn = await get_db()
-    try:
-        rows = await database.get_all_subscriptions(limit=200)
-        total_active = await database.count_active_subscriptions()
+    rows = await database.get_all_subscriptions(limit=200)
+    total_active = await database.count_active_subscriptions()
+    
+    html = f'<div class="page-title">📋 Подписки</div>'
+    html += f'<div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">'
+    html += f'<div class="stat-card"><div class="stat-number">{total_active}</div><div class="stat-label">Активных подписок</div></div></div>'
+    
+    if rows:
+        html += '<div class="table-container"><table><tr><th>ID</th><th>Пользователь</th><th>План</th><th>Начало</th><th>Окончание</th><th>Статус</th></tr>'
+        for row in rows:
+            status_color = "#00ffcc" if row['status'] == 'active' else "#ff4488"
+            end_date_str = row['end_date'].strftime('%d.%m.%Y') if row['end_date'] else '∞'
+            html += f'''
+            <tr>
+                <td>{row['id']}</td>
+                <td>@{row.get('username') or row.get('first_name') or row['user_id']}</td>
+                <td>{row['plan']}</td>
+                <td>{row['start_date'].strftime('%d.%m.%Y') if row['start_date'] else '-'}</td>
+                <td>{end_date_str}</td>
+                <td><span style="color:{status_color};">{row['status']}</span></td>
+            </tr>
+            '''
+        html += '</table></div>'
+    else:
+        html += '<div class="empty">😕 Подписок пока нет</div>'
         
-        html = f'<div class="page-title">📋 Подписки</div>'
-        html += f'<div class="stats" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));">'
-        html += f'<div class="stat-card"><div class="stat-number">{total_active}</div><div class="stat-label">Активных подписок</div></div></div>'
-        
-        if rows:
-            html += '<div class="table-container"><table><tr><th>ID</th><th>Пользователь</th><th>План</th><th>Начало</th><th>Окончание</th><th>Статус</th></tr>'
-            for row in rows:
-                status_color = "#00ffcc" if row['status'] == 'active' else "#ff4488"
-                end_date_str = row['end_date'].strftime('%d.%m.%Y') if row['end_date'] else '∞'
-                html += f'''
-                <tr>
-                    <td>{row['id']}</td>
-                    <td>@{row.get('username') or row.get('first_name') or row['user_id']}</td>
-                    <td>{row['plan']}</td>
-                    <td>{row['start_date'].strftime('%d.%m.%Y') if row['start_date'] else '-'}</td>
-                    <td>{end_date_str}</td>
-                    <td><span style="color:{status_color};">{row['status']}</span></td>
-                </tr>
-                '''
-            html += '</table></div>'
-        else:
-            html += '<div class="empty">😕 Подписок пока нет</div>'
-            
-        menu = MENU.replace('📋 Подписки', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📋 Подписки</span>')
-        html = BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html)
-        return HTMLResponse(content=html)
-    finally:
-        await release_db(conn)
+    menu = MENU.replace('📋 Подписки', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📋 Подписки</span>')
+    html = BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html)
+    return HTMLResponse(content=html)
 
 @app.get("/blocked", response_class=HTMLResponse)
 async def blocked_page():
-    conn = await get_db()
-    try:
+    async with database.pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM blocked_users ORDER BY blocked_at DESC")
         total = len(rows)
         
@@ -693,8 +664,6 @@ async def blocked_page():
         menu = MENU.replace('🚫 ЧС', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">🚫 ЧС</span>')
         html = BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html)
         return HTMLResponse(content=html)
-    finally:
-        await release_db(conn)
 
 @app.get("/withdrawals", response_class=HTMLResponse)
 async def withdrawals_page():
@@ -708,17 +677,16 @@ async def settings_page():
     menu = MENU.replace('⚙️ Настройки', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">⚙️ Настройки</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
-def get_badge_class(content_type):
-    types = {
-        'text': 'text',
-        'photo': 'photo',
-        'video': 'video',
-        'voice': 'voice',
-        'sticker': 'sticker',
-        'video_note': 'video_note'
-    }
-    return types.get(content_type, 'text')
+@app.on_event("startup")
+async def startup_event():
+    await database.init_pool()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    if database.pool:
+        await database.pool.close()
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+EOF
