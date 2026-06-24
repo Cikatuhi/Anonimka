@@ -519,12 +519,15 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    user_id = query.from_user.id
+    payment_link = f"https://ваш-сайт.ру/{user_id}"
+
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
     )
 
     keyboard = [
-        [InlineKeyboardButton("👀 Узнать отправителя", url="https://ваш-сайт.ру")]
+        [InlineKeyboardButton("👀 Узнать отправителя", url=payment_link)]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
