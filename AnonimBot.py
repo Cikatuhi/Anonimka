@@ -168,16 +168,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     original_text = context.user_data.get('original_text', 'Сообщение')
                     original_reply_markup = context.user_data.get('original_reply_markup')
-                    original_chat_id = context.user_data.get('original_chat_id', user_id)
                     question_message_id = context.user_data.get('question_message_id')
-
-                    await context.bot.delete_message(
+            
+                    # Редактируем сообщение с вопросом, возвращая исходный текст и кнопки
+                    await context.bot.edit_message_text(
                         chat_id=user_id,
-                        message_id=question_message_id
-                    )
-
-                    await context.bot.send_message(
-                        chat_id=original_chat_id,
+                        message_id=question_message_id,
                         text=original_text,
                         reply_markup=original_reply_markup,
                         parse_mode="HTML"
