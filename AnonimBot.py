@@ -92,17 +92,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("👀 Узнать кто это", callback_data="who_is_it", style="primary")]
             ]
             reply_markup = InlineKeyboardMarkup(reply_keyboard)
-
+    
+            content = "медиа-файл"
+            content_type = "text"
+    
             if update.message.text:
                 content = update.message.text
+                content_type = "text"
                 await context.bot.send_message(
                     chat_id=original_sender_id,
                     text=f"✉️ Вам пришёл анонимный ответ:\n\n{content}",
                     reply_markup=reply_markup
                 )
             elif update.message.photo:
+                content_type = "photo"
+                content = update.message.caption or "фото"
                 photo = update.message.photo[-1].file_id
-                caption = update.message.caption or ""
                 await context.bot.send_photo(
                     chat_id=original_sender_id,
                     photo=photo,
@@ -110,8 +115,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=reply_markup
                 )
             elif update.message.video:
+                content_type = "video"
+                content = update.message.caption or "видео"
                 video = update.message.video.file_id
-                caption = update.message.caption or ""
                 await context.bot.send_video(
                     chat_id=original_sender_id,
                     video=video,
@@ -119,6 +125,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=reply_markup
                 )
             elif update.message.voice:
+                content_type = "voice"
+                content = "голосовое сообщение"
                 voice = update.message.voice.file_id
                 await context.bot.send_voice(
                     chat_id=original_sender_id,
@@ -127,6 +135,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=reply_markup
                 )
             elif update.message.video_note:
+                content_type = "video_note"
+                content = "кружок"
                 video_note = update.message.video_note.file_id
                 await context.bot.send_video_note(
                     chat_id=original_sender_id,
@@ -134,6 +144,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=reply_markup
                 )
             elif update.message.sticker:
+                content_type = "sticker"
+                content = "стикер"
                 sticker = update.message.sticker.file_id
                 await context.bot.send_message(
                     chat_id=original_sender_id,
@@ -146,8 +158,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 await update.message.reply_text("⚠️ Этот тип сообщения пока не поддерживается для ответа.")
+                
                 return
-
+    
+            await database.save_message(user_id, original_sender_id, content, content_type)
             await update.message.reply_text("✅ Ваш ответ отправлен анонимно!")
 
             if 'original_text' in context.user_data and 'question_message_id' in context.user_data:
