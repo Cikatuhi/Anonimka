@@ -1,85 +1,108 @@
-import os
-import subprocess
-import hmac
-import hashlib
-from flask import Flask, request, jsonify
+from fastapi import APIRouter, Request, HTTPException
+import json
+import logging
 
-app = Flask(__name__)
+from subscription import SubscriptionManager
 
-# Конфигурация
-REPO_PATH = "/root/Anonimno-Artem-"
-SECRET = "1f0r2a9g3p8o4i7n5t6"
-BOT_SERVICE = "webhook-handler.service"
+logger = logging.getLogger(__name__)
+router = APIRouter()
+subscription_manager = SubscriptionManager()
 
-@app.route('/webhook', methods=['POST'])
-def handle_webhook():
-    """Обрабатывает POST-запрос от GitHub"""
-    
-    # 1. Проверяем секретный токен (безопасность)
-    signature = request.headers.get('X-Hub-Signature-256')
-    if signature and SECRET:
-        # Вычисляем подпись
-        hash_object = hmac.new(
-            SECRET.encode('utf-8'),
-            msg=request.data,
-            digestmod=hashlib.sha256
-        )
-        expected_signature = f"sha256={hash_object.hexdigest()}"
-        
-        # Сравниваем подписи
-        if not hmac.compare_digest(signature, expected_signature):
-            return jsonify({"error": "Invalid signature"}), 401
-    
-    # 2. Проверяем, что это событие push
-    event_type = request.headers.get('X-GitHub-Event')
-    if event_type != 'push':
-        return jsonify({"message": "Ignored event"}), 200
-    
-    # 3. Выполняем git pull
+@router.post("/webhook")
+async def handle_webhook(request: Request):
     try:
-        result = subprocess.run(
-            ['git', 'pull'],
-            cwd=REPO_PATH,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        output = result.stdout + result.stderr
-        print(f"Git pull output:\n{output}")
+        body = await request.json()
+        logger.info(f"Received webhook: {body}")
         
-        if result.returncode != 0:
-            return jsonify({"error": "Git pull failed", "details": output}), 500
-            
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "Git pull timeout"}), 500
+        event_type = body.get("EventType")
+        if event_type not in ["Payment", "Recurrent"]:
+            logger.info(f"Ignoring event: {event_type}")
+            return {"status": "ignored"}
+        
+        model = body.get("Model", {})
+        
+        amount_rub = model.get("Amount", 0)
+        
+        payload = {
+            "AccountId": model.get("AccountId"),
+            "Amount": amount_rub,  # Оставляем в рублях для совместимости
+            "Status": model.get("Status"),
+            "TransactionId": model.get("TransactionId"),
+            "SubscriptionId": model.get("SubscriptionId"),
+            "IsRecurrent": model.get("IsRecurrent", False),
+            "ReasonCode": model.get("ReasonCode"),
+            "CardToken": model.get("Token")
+        }
+        
+        result = await subscription_manager.handle_payment_webhook(payload)
+        
+        logger.info(f"Webhook processed for user {payload.get('AccountId')}: {result.get('message', '')}")
+        
+        return {"status": "processed", "result": result}
+        
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON received")
+        raise HTTPException(status_code=400, detail="Invalid JSON")
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    
-    # 4. Перезапускаем бота через systemd
+        logger.error(f"Error processing webhook: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+@router.post("/subscription/init")
+async def initialize_subscription(request: Request):
     try:
-        # restart бота
-        subprocess.run(
-            ['systemctl', 'restart', BOT_SERVICE],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        print(f"✅ Бот {BOT_SERVICE} перезапущен успешно")
+        body = await request.json()
+        user_id = body.get("user_id")
+        card_token = body.get("card_token")
         
-        return jsonify({"status": "success", "message": "Bot restarted"}), 200
+        if not user_id or not card_token:
+            raise HTTPException(status_code=400, detail="Missing user_id or card_token")
         
-    except subprocess.CalledProcessError as e:
-        return jsonify({"error": f"Failed to restart bot: {e.stderr}"}), 500
+        result = await subscription_manager.handle_initial_payment(user_id, card_token)
+        return result
+        
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Error initializing subscription: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Простая проверка, что обработчик жив"""
-    return jsonify({"status": "ok"}), 200
+@router.post("/subscription/daily-retry/{user_id}")
+async def trigger_daily_retry(user_id: str):
+    result = await subscription_manager.handle_daily_low_retry(user_id)
+    return result
 
-if __name__ == '__main__':
-    # Запускаем Flask-сервер на всех интерфейсах, порт 5000
-    # В продакшене лучше использовать Gunicorn или uWSGI
-    app.run(host='0.0.0.0', port=5000, debug=False)
+@router.get("/subscription/{user_id}")
+async def get_subscription_status(user_id: str):
+    subscription = subscription_manager.get_user_subscription(user_id)
+    
+    if not subscription:
+        return {
+            "success": False,
+            "message": "User not found"
+        }
+    
+    return {
+        "success": True,
+        "user_id": user_id,
+        "status": subscription.status,
+        "current_plan": subscription.current_plan.value if subscription.current_plan else None,
+        "current_amount": subscription.current_amount / 100 if subscription.current_amount else 0,
+        "active_until": subscription.active_until.isoformat() if subscription.active_until else None,
+        "successful_payments": subscription.successful_payments,
+        "failed_payments": subscription.failed_payments,
+        "cascade_attempts": subscription.cascade_attempts
+    }
+
+@router.post("/subscription/cancel/{user_id}")
+async def cancel_subscription(user_id: str):
+    subscription = subscription_manager.get_user_subscription(user_id)
+    if not subscription:
+        return {"success": False, "message": "User not found"}
+    
+    if subscription.subscription_id:
+        result = await subscription_manager.client.cancel_subscription(subscription.subscription_id)
+        if result["success"]:
+            subscription.status = SubscriptionStatus.CANCELLED
+            return {"success": True, "message": "Subscription cancelled"}
+        else:
+            return {"success": False, "error": result.get("error")}
+    
+    return {"success": False, "message": "No subscription to cancel"}
