@@ -553,8 +553,6 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
-        f"Нажмите на кнопку ниже, чтобы перейти на страницу оплаты.\n\n"
-        f"После оплаты вы сможете увидеть отправителя."
     )
 
     keyboard = [
