@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler, AIORateLimiter
 import database
+from datetime import datetime
+import random
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
