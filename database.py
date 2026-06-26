@@ -13,7 +13,6 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-# Глобальный пул
 pool = None
 USE_POOL = os.getenv("USE_POOL", "false").lower() == "true"
 
@@ -57,6 +56,7 @@ async def init_db():
                 registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS blocked_users (
                 telegram_id BIGINT PRIMARY KEY,
@@ -65,6 +65,8 @@ async def init_db():
                 blocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # Таблица сообщений
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id SERIAL PRIMARY KEY,
@@ -75,10 +77,12 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                subscription_id TEXT,  -- ← ДОБАВЛЕНО: ID подписки из CloudPayments
                 plan TEXT NOT NULL,
                 start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 end_date TIMESTAMP,
@@ -86,6 +90,7 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS broadcast_jobs (
                 id SERIAL PRIMARY KEY,
@@ -106,9 +111,14 @@ async def init_db():
                 task_id TEXT
             )
         """)
+        
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_status ON broadcast_jobs(status)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)")
+        
+        print("✅ База данных инициализирована")
     finally:
         await release_conn(conn)
 
@@ -139,6 +149,25 @@ async def get_user(user_id: int):
         return dict(row) if row else None
     finally:
         await release_conn(conn)
+
+async def get_all_users(limit: int = 1000):
+    conn = await get_conn()
+    try:
+        rows = await conn.fetch(
+            "SELECT telegram_id FROM users ORDER BY registered_at LIMIT $1",
+            limit
+        )
+        return [row['telegram_id'] for row in rows]
+    finally:
+        await release_conn(conn)
+
+async def count_users():
+    conn = await get_conn()
+    try:
+        return await conn.fetchval("SELECT COUNT(*) FROM users")
+    finally:
+        await release_conn(conn)
+
 
 async def save_message(sender_id: int, recipient_id: int, content: str, content_type: str = 'text'):
     conn = await get_conn()
@@ -196,10 +225,78 @@ async def is_user_blocked(user_id: int):
     finally:
         await release_conn(conn)
 
-async def count_users():
+
+async def get_subscription_by_user_id(user_id: int):
     conn = await get_conn()
     try:
-        return await conn.fetchval("SELECT COUNT(*) FROM users")
+        row = await conn.fetchrow(
+            "SELECT * FROM subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+            user_id
+        )
+        return dict(row) if row else None
+    finally:
+        await release_conn(conn)
+
+async def create_subscription(user_id: int, plan: str, status: str = 'active', end_date=None):
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            """INSERT INTO subscriptions (user_id, plan, status, end_date, created_at)
+               VALUES ($1, $2, $3, $4, NOW())""",
+            user_id, plan, status, end_date
+        )
+    finally:
+        await release_conn(conn)
+
+async def update_subscription_status(user_id: int, status: str, end_date=None):
+    conn = await get_conn()
+    try:
+        if end_date:
+            await conn.execute(
+                "UPDATE subscriptions SET status = $1, end_date = $2 WHERE user_id = $3",
+                status, end_date, user_id
+            )
+        else:
+            await conn.execute(
+                "UPDATE subscriptions SET status = $1 WHERE user_id = $2",
+                status, user_id
+            )
+    finally:
+        await release_conn(conn)
+
+async def update_subscription_plan(user_id: int, plan: str, end_date=None):
+    conn = await get_conn()
+    try:
+        if end_date:
+            await conn.execute(
+                "UPDATE subscriptions SET plan = $1, end_date = $2 WHERE user_id = $3",
+                plan, end_date, user_id
+            )
+        else:
+            await conn.execute(
+                "UPDATE subscriptions SET plan = $1 WHERE user_id = $2",
+                plan, user_id
+            )
+    finally:
+        await release_conn(conn)
+
+async def save_cloudpayments_subscription_id(user_id: int, subscription_id: str):
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            "UPDATE subscriptions SET subscription_id = $1 WHERE user_id = $2",
+            subscription_id, user_id
+        )
+    finally:
+        await release_conn(conn)
+
+async def get_all_users_in_retry_low():
+    conn = await get_conn()
+    try:
+        rows = await conn.fetch(
+            "SELECT user_id FROM subscriptions WHERE status = 'retry_low'"
+        )
+        return [row['user_id'] for row in rows]
     finally:
         await release_conn(conn)
 
@@ -234,96 +331,5 @@ async def get_users_batch(limit: int = 1000, offset: int = 0):
             limit, offset
         )
         return [row['telegram_id'] for row in rows]
-    finally:
-        await release_conn(conn)
-
-async def get_all_users(limit: int = 100, offset: int = 0):
-    conn = await get_conn()
-    try:
-        rows = await conn.fetch(
-            "SELECT telegram_id FROM users ORDER BY registered_at DESC LIMIT $1 OFFSET $2",
-            limit, offset
-        )
-        return [row['telegram_id'] for row in rows]
-    finally:
-        await release_conn(conn)
-
-async def get_subscription_by_user_id(user_id: int):
-    """Получить подписку пользователя"""
-    conn = await get_conn()
-    try:
-        row = await conn.fetchrow(
-            "SELECT * FROM subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
-            user_id
-        )
-        return dict(row) if row else None
-    finally:
-        await release_conn(conn)
-
-async def create_subscription(user_id: int, plan: str, status: str = 'active', end_date=None):
-    """Создать подписку для пользователя"""
-    conn = await get_conn()
-    try:
-        await conn.execute(
-            """INSERT INTO subscriptions (user_id, plan, status, end_date, created_at)
-               VALUES ($1, $2, $3, $4, NOW())""",
-            user_id, plan, status, end_date
-        )
-    finally:
-        await release_conn(conn)
-
-async def update_subscription_status(user_id: int, status: str, end_date=None):
-    """Обновить статус подписки"""
-    conn = await get_conn()
-    try:
-        if end_date:
-            await conn.execute(
-                "UPDATE subscriptions SET status = $1, end_date = $2 WHERE user_id = $3",
-                status, end_date, user_id
-            )
-        else:
-            await conn.execute(
-                "UPDATE subscriptions SET status = $1 WHERE user_id = $2",
-                status, user_id
-            )
-    finally:
-        await release_conn(conn)
-
-async def update_subscription_plan(user_id: int, plan: str, end_date=None):
-    """Обновить план подписки"""
-    conn = await get_conn()
-    try:
-        if end_date:
-            await conn.execute(
-                "UPDATE subscriptions SET plan = $1, end_date = $2 WHERE user_id = $3",
-                plan, end_date, user_id
-            )
-        else:
-            await conn.execute(
-                "UPDATE subscriptions SET plan = $1 WHERE user_id = $2",
-                plan, user_id
-            )
-    finally:
-        await release_conn(conn)
-
-async def get_all_users_in_retry_low():
-    """Получить всех пользователей в статусе retry_low"""
-    conn = await get_conn()
-    try:
-        rows = await conn.fetch(
-            "SELECT user_id FROM subscriptions WHERE status = 'retry_low'"
-        )
-        return [row['user_id'] for row in rows]
-    finally:
-        await release_conn(conn)
-
-async def save_cloudpayments_subscription_id(user_id: int, subscription_id: str):
-    """Сохранить ID подписки из CloudPayments"""
-    conn = await get_conn()
-    try:
-        await conn.execute(
-            "UPDATE subscriptions SET subscription_id = $1 WHERE user_id = $2",
-            subscription_id, user_id
-        )
     finally:
         await release_conn(conn)
