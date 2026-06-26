@@ -1,12 +1,12 @@
 import asyncio
 import logging
 import os
+import random
+from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler, AIORateLimiter
 import database
-from datetime import datetime
-import random
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
@@ -18,6 +18,7 @@ reply_sessions = {}
 MAX_SESSIONS = 1000
 
 ADMIN_ID = 7683869901
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -82,16 +83,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         disable_web_page_preview=True
     )
 
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
 
+    # === ОБРАБОТКА ОТВЕТА ===
     if user_id in reply_sessions:
         original_sender_id = reply_sessions.pop(user_id)
         try:
             reply_keyboard = [
                 [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
-                [InlineKeyboardButton("👀 Узнать кто это", callback_data="who_is_it", style="primary")]
+                [InlineKeyboardButton("👀 Узнать кто это", callback_data=f"who_is_it_{user_id}")]  # ← ID отправителя
             ]
             reply_markup = InlineKeyboardMarkup(reply_keyboard)
     
@@ -113,7 +116,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_photo(
                     chat_id=original_sender_id,
                     photo=photo,
-                    caption=f"✉️ Вам пришёл анонимный ответ:\n\n{caption}",
+                    caption=f"✉️ Вам пришёл анонимный ответ:\n\n{content}",
                     reply_markup=reply_markup
                 )
             elif update.message.video:
@@ -123,7 +126,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_video(
                     chat_id=original_sender_id,
                     video=video,
-                    caption=f"✉️ Вам пришёл анонимный ответ:\n\n{caption}",
+                    caption=f"✉️ Вам пришёл анонимный ответ:\n\n{content}",
                     reply_markup=reply_markup
                 )
             elif update.message.voice:
@@ -160,7 +163,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 await update.message.reply_text("⚠️ Этот тип сообщения пока не поддерживается для ответа.")
-                
                 return
     
             await database.save_message(user_id, original_sender_id, content, content_type)
@@ -172,7 +174,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     original_reply_markup = context.user_data.get('original_reply_markup')
                     question_message_id = context.user_data.get('question_message_id')
             
-                    # Редактируем сообщение с вопросом, возвращая исходный текст и кнопки
                     await context.bot.edit_message_text(
                         chat_id=user_id,
                         message_id=question_message_id,
@@ -234,6 +235,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 print(f"Ошибка отправки ответа: {e}")
         return
 
+    # === ОТПРАВКА НОВОГО АНОНИМНОГО СООБЩЕНИЯ ===
     session = active_sessions.pop(user_id, None)
     if not session:
         await update.message.reply_text("Отправьте /start, чтобы получить свою ссылку.")
@@ -243,9 +245,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recipient_name = session['recipient_name']
 
     try:
+        # ✅ КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: добавляем ID отправителя в callback_data
         reply_keyboard = [
             [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
-            [InlineKeyboardButton("👀 Узнать кто это", callback_data="who_is_it", style="primary")]
+            [InlineKeyboardButton("👀 Узнать кто это", callback_data=f"who_is_it_{user_id}")]  # ← ID отправителя!
         ]
         reply_markup = InlineKeyboardMarkup(reply_keyboard)
 
@@ -305,7 +308,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sticker = update.message.sticker.file_id
             await context.bot.send_message(
                 chat_id=recipient_id,
-                text="✉️ Вам пришёл анонимный стикер:"
+                text="✉️ Вам пришёл анонимный стикер:",
+                reply_markup=reply_markup
             )
             await context.bot.send_sticker(
                 chat_id=recipient_id,
@@ -378,6 +382,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Не удалось отправить сообщение. Возможно, получатель заблокировал бота.")
             print(f"Ошибка отправки: {e}")
 
+
 async def send_again_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -403,6 +408,7 @@ async def send_again_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
+
 
 async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -446,6 +452,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await query.edit_message_text("❌ Отправка отменена.")
+
 
 async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -527,37 +534,34 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         parse_mode="HTML"
     )
 
+
 async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
-    user_id = query.from_user.id
 
+    user_id = query.from_user.id
+    
     subscription = await database.get_subscription_by_user_id(user_id)
     is_active = False
-    
     if subscription:
         status = subscription.get('status')
         end_date = subscription.get('end_date')
-        
-        if status == 'active':
-            if end_date is None or end_date > datetime.now():
-                is_active = True
+        if status == 'active' and end_date and end_date > datetime.now():
+            is_active = True
+        elif status == 'active' and end_date is None:
+            is_active = True
     
     if not is_active:
         payment_link = f"http://201.51.11.220:8001/{user_id}"
-        
         text = (
             f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
-            f"Оплатите подписку, чтобы увидеть отправителя."
         )
-        
         keyboard = [
             [InlineKeyboardButton("👀 Узнать отправителя", url=payment_link)]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
+        await context.bot.send_message(
+            chat_id=query.from_user.id,
             text=text,
             reply_markup=reply_markup,
             parse_mode="HTML"
@@ -569,9 +573,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if callback_data.startswith("who_is_it_"):
         try:
-            parts = callback_data.split("_")
-            if len(parts) >= 3:
-                sender_id = int(parts[2])
+            sender_id = int(callback_data.split("_")[2])
         except (IndexError, ValueError):
             sender_id = None
     
@@ -600,7 +602,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML"
             )
             return
-
+    
     all_users = await database.get_all_users(limit=1000)
     available_users = [u for u in all_users if u != user_id]
     
@@ -611,7 +613,6 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    import random
     random_user_id = random.choice(available_users)
     random_user = await database.get_user(random_user_id)
     
@@ -644,81 +645,6 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
-async def show_sender_info(query, sender_data):
-    """Показывает информацию о реальном отправителе"""
-    user_id = query.from_user.id
-    sender_id = sender_data['telegram_id']
-    username = sender_data.get('username', 'без_юзернейма')
-    first_name = sender_data.get('first_name', 'Пользователь')
-    
-    text = (
-        f"🤫 <b>Пользователь рассекречен. Им оказался – {first_name}</b>\n\n"
-        f"Знакомы вы с этим пользователем?\n\n"
-        f"<b>Логин пользователя:</b> @{username}\n"
-        f"<b>Его идентификатор в Telegram:</b> <code>{sender_id}</code>\n\n"
-        f"Перейти в профиль пользователя, можно по нажатию на кнопку ниже."
-    )
-    
-    keyboard = [
-        [InlineKeyboardButton("👤 Перейти в профиль", url=f"tg://user?id={sender_id}")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        text=text,
-        reply_markup=reply_markup,
-        parse_mode="HTML"
-    )
-
-
-async def show_random_user(query):
-    """Показывает рандомного пользователя из БД"""
-    user_id = query.from_user.id
-    
-    # Получаем всех пользователей, кроме самого пользователя
-    all_users = await database.get_all_users(limit=1000)
-    available_users = [u for u in all_users if u != user_id]
-    
-    if not available_users:
-        await query.edit_message_text(
-            text="😅 К сожалению, в базе пока нет других пользователей.",
-            parse_mode="HTML"
-        )
-        return
-    
-    # Выбираем рандомного пользователя
-    import random
-    random_user_id = random.choice(available_users)
-    random_user = await database.get_user(random_user_id)
-    
-    if not random_user:
-        await query.edit_message_text(
-            text="😅 Произошла ошибка. Попробуйте позже.",
-            parse_mode="HTML"
-        )
-        return
-    
-    username = random_user.get('username', 'без_юзернейма')
-    first_name = random_user.get('first_name', 'Пользователь')
-    
-    text = (
-        f"🤫 <b>Этот пользователь отправил вам анонимное сообщение – {first_name}</b>\n\n"
-        f"Знакомы вы с этим пользователем?\n\n"
-        f"<b>Логин пользователя:</b> @{username}\n"
-        f"<b>Его идентификатор в Telegram:</b> <code>{random_user_id}</code>\n\n"
-        f"Перейти в профиль пользователя, можно по нажатию на кнопку ниже."
-    )
-    
-    keyboard = [
-        [InlineKeyboardButton("👤 Перейти в профиль", url=f"tg://user?id={random_user_id}")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        text=text,
-        reply_markup=reply_markup,
-        parse_mode="HTML"
-    )
 
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -736,6 +662,7 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f" └─ ОРГНИП: 325632700083871\n",
         parse_mode="HTML"
     )
+
 
 def main():
     import asyncio
@@ -756,6 +683,7 @@ def main():
 
     print("🤖 Бот запущен и готов к приёму анонимных сообщений...")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
