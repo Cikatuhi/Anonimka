@@ -247,3 +247,83 @@ async def get_all_users(limit: int = 100, offset: int = 0):
         return [row['telegram_id'] for row in rows]
     finally:
         await release_conn(conn)
+
+async def get_subscription_by_user_id(user_id: int):
+    """Получить подписку пользователя"""
+    conn = await get_conn()
+    try:
+        row = await conn.fetchrow(
+            "SELECT * FROM subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+            user_id
+        )
+        return dict(row) if row else None
+    finally:
+        await release_conn(conn)
+
+async def create_subscription(user_id: int, plan: str, status: str = 'active', end_date=None):
+    """Создать подписку для пользователя"""
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            """INSERT INTO subscriptions (user_id, plan, status, end_date, created_at)
+               VALUES ($1, $2, $3, $4, NOW())""",
+            user_id, plan, status, end_date
+        )
+    finally:
+        await release_conn(conn)
+
+async def update_subscription_status(user_id: int, status: str, end_date=None):
+    """Обновить статус подписки"""
+    conn = await get_conn()
+    try:
+        if end_date:
+            await conn.execute(
+                "UPDATE subscriptions SET status = $1, end_date = $2 WHERE user_id = $3",
+                status, end_date, user_id
+            )
+        else:
+            await conn.execute(
+                "UPDATE subscriptions SET status = $1 WHERE user_id = $2",
+                status, user_id
+            )
+    finally:
+        await release_conn(conn)
+
+async def update_subscription_plan(user_id: int, plan: str, end_date=None):
+    """Обновить план подписки"""
+    conn = await get_conn()
+    try:
+        if end_date:
+            await conn.execute(
+                "UPDATE subscriptions SET plan = $1, end_date = $2 WHERE user_id = $3",
+                plan, end_date, user_id
+            )
+        else:
+            await conn.execute(
+                "UPDATE subscriptions SET plan = $1 WHERE user_id = $2",
+                plan, user_id
+            )
+    finally:
+        await release_conn(conn)
+
+async def get_all_users_in_retry_low():
+    """Получить всех пользователей в статусе retry_low"""
+    conn = await get_conn()
+    try:
+        rows = await conn.fetch(
+            "SELECT user_id FROM subscriptions WHERE status = 'retry_low'"
+        )
+        return [row['user_id'] for row in rows]
+    finally:
+        await release_conn(conn)
+
+async def save_cloudpayments_subscription_id(user_id: int, subscription_id: str):
+    """Сохранить ID подписки из CloudPayments"""
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            "UPDATE subscriptions SET subscription_id = $1 WHERE user_id = $2",
+            subscription_id, user_id
+        )
+    finally:
+        await release_conn(conn)
