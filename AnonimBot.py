@@ -531,6 +531,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = query.from_user.id
     
+    # Проверка подписки
     subscription = await database.get_subscription_by_user_id(user_id)
     is_active = False
     if subscription:
@@ -541,27 +542,119 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif status == 'active' and end_date is None:
             is_active = True
     
-    if is_active:
-        await query.edit_message_text(
-            text="🔍 <b>Отправитель найден!</b>\n\n"
-                 "Вы можете узнать, кто отправил вам анонимное сообщение.",
+    # Если нет подписки → предложить оплатить
+    if not is_active:
+        payment_link = f"http://201.51.11.220:8001/{user_id}"
+        text = (
+            f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
+        )
+        keyboard = [
+            [InlineKeyboardButton("👀 Узнать отправителя", url=payment_link)]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(
+            chat_id=query.from_user.id,
+            text=text,
+            reply_markup=reply_markup,
             parse_mode="HTML"
         )
         return
     
-    payment_link = f"http://201.51.11.220:8001/{user_id}"
+    # ✅ ПОДПИСКА АКТИВНА → определяем, кого показать
+    
+    # Пытаемся получить ID отправителя из callback_data
+    callback_data = query.data
+    sender_id = None
+    
+    # Если callback_data содержит sender_id (например, "who_is_it_1379865171")
+    if callback_data.startswith("who_is_it_"):
+        try:
+            sender_id = int(callback_data.split("_")[2])
+        except (IndexError, ValueError):
+            sender_id = None
+    
+    # Если sender_id найден → показываем реального отправителя
+    if sender_id:
+        sender_data = await database.get_user(sender_id)
+        if sender_data:
+            await show_sender_info(query, sender_data)
+            return
+    
+    # Если sender_id НЕ НАЙДЕН → показываем рандомного пользователя
+    await show_random_user(query)
+
+
+async def show_sender_info(query, sender_data):
+    """Показывает информацию о реальном отправителе"""
+    user_id = query.from_user.id
+    sender_id = sender_data['telegram_id']
+    username = sender_data.get('username', 'без_юзернейма')
+    first_name = sender_data.get('first_name', 'Пользователь')
     
     text = (
-        f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
+        f"🤫 <b>Пользователь рассекречен. Им оказался – {first_name}</b>\n\n"
+        f"Знакомы вы с этим пользователем?\n\n"
+        f"<b>Логин пользователя:</b> @{username}\n"
+        f"<b>Его идентификатор в Telegram:</b> <code>{sender_id}</code>\n\n"
+        f"Перейти в профиль пользователя, можно по нажатию на кнопку ниже."
     )
-
+    
     keyboard = [
-        [InlineKeyboardButton("👀 Узнать отправителя", url=payment_link)]
+        [InlineKeyboardButton("👤 Перейти в профиль", url=f"tg://user?id={sender_id}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
 
-    await context.bot.send_message(
-        chat_id=query.from_user.id,
+
+async def show_random_user(query):
+    """Показывает рандомного пользователя из БД"""
+    user_id = query.from_user.id
+    
+    # Получаем всех пользователей, кроме самого пользователя
+    all_users = await database.get_all_users(limit=1000)
+    available_users = [u for u in all_users if u != user_id]
+    
+    if not available_users:
+        await query.edit_message_text(
+            text="😅 К сожалению, в базе пока нет других пользователей.",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Выбираем рандомного пользователя
+    import random
+    random_user_id = random.choice(available_users)
+    random_user = await database.get_user(random_user_id)
+    
+    if not random_user:
+        await query.edit_message_text(
+            text="😅 Произошла ошибка. Попробуйте позже.",
+            parse_mode="HTML"
+        )
+        return
+    
+    username = random_user.get('username', 'без_юзернейма')
+    first_name = random_user.get('first_name', 'Пользователь')
+    
+    text = (
+        f"🤫 <b>Этот пользователь отправил вам анонимное сообщение – {first_name}</b>\n\n"
+        f"Знакомы вы с этим пользователем?\n\n"
+        f"<b>Логин пользователя:</b> @{username}\n"
+        f"<b>Его идентификатор в Telegram:</b> <code>{random_user_id}</code>\n\n"
+        f"Перейти в профиль пользователя, можно по нажатию на кнопку ниже."
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("👤 Перейти в профиль", url=f"tg://user?id={random_user_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
         text=text,
         reply_markup=reply_markup,
         parse_mode="HTML"
