@@ -9,7 +9,7 @@ load_dotenv()
 class Config:
 
     PUBLIC_ID: str = os.getenv("CLOUDPAYMENTS_PUBLIC_ID", "test_api_00000000000000000000002")
-    API_SECRET: str = os.getenv("CLOUDPAYMENTS_API_SECRET", "your_api_secret")
+    API_SECRET: str = os.getenv("CLOUDPAYMENTS_API_SECRET", "test_api_00000000000000000000002")
     API_URL: str = "https://api.cloudpayments.ru"
     
     # Планы подписки (сумма в копейках, срок в днях)
