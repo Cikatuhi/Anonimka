@@ -530,11 +530,31 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     user_id = query.from_user.id
+    
+    subscription = await database.get_subscription_by_user_id(user_id)
+    is_active = False
+    if subscription:
+        status = subscription.get('status')
+        end_date = subscription.get('end_date')
+        if status == 'active' and end_date and end_date > datetime.utcnow():
+            is_active = True
+        elif status == 'active' and end_date is None:
+            is_active = True
+    
+    if is_active:
+        await query.edit_message_text(
+            text="🔍 <b>Отправитель найден!</b>\n\n"
+                 "Вы можете узнать, кто отправил вам анонимное сообщение.",
+            parse_mode="HTML"
+        )
+        return
+    
     payment_link = f"http://201.51.11.220:8001/{user_id}"
-
+    
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
-        f"Нажмите на кнопку ниже, чтобы перейти на страницу оплаты."
+        f"Нажмите на кнопку ниже, чтобы перейти на страницу оплаты.\n\n"
+        f"После оплаты вы сможете увидеть отправителя."
     )
 
     keyboard = [
