@@ -74,7 +74,7 @@ async def process_job(job):
                 results['failed'] += 1
             
             # Обновляем прогресс
-            if i % 50 == 0 or i == total - 1:
+            if i % 5 == 0 or i == total - 1:
                 progress = ((i + 1) / total) * 100
                 await update_job_status(
                     job_id, 'running',
