@@ -13,18 +13,15 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 async def process_job(job):
-    """Обрабатывает одну задачу из очереди"""
     job_id = job['id']
     user_ids = json.loads(job['user_ids_json'])
     message = job['message']
     
-    # Обновляем статус на running
     await update_job_status(job_id, 'running', started_at=datetime.now())
     
     total = len(user_ids)
     results = {'sent': 0, 'failed': 0, 'blocked': 0}
     
-    # Клавиатура для сообщений
     keyboard = {
         "inline_keyboard": [
             [{"text": "✍️ Ответить", "callback_data": "reply_anon"}],
@@ -35,7 +32,6 @@ async def process_job(job):
     
     async with httpx.AsyncClient(timeout=30.0) as client:
         for i, user_id in enumerate(user_ids):
-            # Мониторинг CPU
             if i % 10 == 0 and i > 0:
                 cpu = psutil.cpu_percent()
                 if cpu > 80:
@@ -58,7 +54,6 @@ async def process_job(job):
                 if response.status_code == 200:
                     results['sent'] += 1
                 else:
-                    # Если заблокирован — добавляем в ЧС и удаляем из users
                     if "bot was blocked" in str(response.json()).lower():
                         results['blocked'] += 1
                         user_data = await database.get_user(user_id)
@@ -73,7 +68,6 @@ async def process_job(job):
             except Exception:
                 results['failed'] += 1
             
-            # Обновляем прогресс
             if i % 5 == 0 or i == total - 1:
                 progress = ((i + 1) / total) * 100
                 await update_job_status(
@@ -87,7 +81,6 @@ async def process_job(job):
             if i % 30 == 0:
                 await asyncio.sleep(0.1)
     
-    # Завершаем задачу
     await update_job_status(
         job_id, 'completed',
         sent_users=results['sent'],
@@ -99,7 +92,6 @@ async def process_job(job):
     print(f"✅ Задача {job_id} завершена")
 
 async def update_job_status(job_id, status, **kwargs):
-    """Обновляет статус задачи"""
     conn = await database.get_conn()
     try:
         fields = []
@@ -114,12 +106,10 @@ async def update_job_status(job_id, status, **kwargs):
         await database.release_conn(conn)
 
 async def main_loop():
-    """Главный цикл воркера"""
     print("🚀 Воркер запущен, ждём задачи...")
     while True:
         try:
             conn = await database.get_conn()
-            # Ищем задачу со статусом pending
             job = await conn.fetchrow(
                 "SELECT * FROM broadcast_jobs WHERE status = 'pending' ORDER BY created_at LIMIT 1"
             )
@@ -129,7 +119,7 @@ async def main_loop():
                 print(f"📨 Найдена задача {job['id']}, начинаем обработку...")
                 await process_job(job)
             else:
-                await asyncio.sleep(5)  # Ждём 5 секунд
+                await asyncio.sleep(5) 
         except Exception as e:
             print(f"❌ Ошибка: {e}")
             await asyncio.sleep(5)
