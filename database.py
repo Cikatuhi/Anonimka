@@ -333,3 +333,21 @@ async def get_users_batch(limit: int = 1000, offset: int = 0):
         return [row['telegram_id'] for row in rows]
     finally:
         await release_conn(conn)
+
+async def get_setting(key: str, default: str = None) -> str:
+    conn = await get_conn()
+    try:
+        row = await conn.fetchrow("SELECT value FROM settings WHERE key = $1", key)
+        return row['value'] if row else default
+    finally:
+        await release_conn(conn)
+
+async def set_setting(key: str, value: str):
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()",
+            key, value
+        )
+    finally:
+        await release_conn(conn)
