@@ -116,7 +116,6 @@ async def process_job(job):
             if i % 30 == 0:
                 await asyncio.sleep(0.1)
     
-    # Завершаем задачу
     await update_job_status(
         job_id, 'completed',
         sent_users=results['sent'],
@@ -146,7 +145,6 @@ async def main_loop():
     while True:
         try:
             conn = await database.get_conn()
-            # Ищем задачи со статусом pending или paused
             job = await conn.fetchrow(
                 "SELECT * FROM broadcast_jobs WHERE status IN ('pending', 'paused') ORDER BY created_at LIMIT 1"
             )
