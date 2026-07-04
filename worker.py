@@ -2,24 +2,27 @@ import os
 import sys
 import json
 import asyncio
-import time
 import httpx
 import psutil
-from datetime import datetime, timedelta
+from datetime import datetime
 import database
 from dotenv import load_dotenv
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
+async def get_job_status(job_id: int) -> str:
+    conn = await database.get_conn()
+    try:
+        row = await conn.fetchrow("SELECT status FROM broadcast_jobs WHERE id = $1", job_id)
+        return row['status'] if row else None
+    finally:
+        await database.release_conn(conn)
+
 async def process_job(job):
-    """Обрабатывает одну задачу из очереди"""
     job_id = job['id']
     user_ids = json.loads(job['user_ids_json'])
     message = job['message']
-    
-    # Обновляем статус на running
-    await update_job_status(job_id, 'running', started_at=datetime.now())
     
     total = len(user_ids)
     results = {'sent': 0, 'failed': 0, 'blocked': 0}
@@ -32,40 +35,39 @@ async def process_job(job):
     }
     message_text = f"✉️ Вам пришло анонимное сообщение:\n\n{message}"
     
+    await update_job_status(job_id, 'running', started_at=datetime.now())
+    
     async with httpx.AsyncClient(timeout=30.0) as client:
         for i, user_id in enumerate(user_ids):
-            # ===== ПРОВЕРКА СТАТУСА КАЖДЫЕ 10 СООБЩЕНИЙ =====
             if i % 10 == 0:
                 current_status = await get_job_status(job_id)
                 if current_status == 'paused':
-                    print(f"⏸️ Задача {job_id} поставлена на паузу. Остановка...")
+                    print(f"⏸️ Задача {job_id} поставлена на паузу. Остановка на {i} сообщении...")
                     await update_job_status(
                         job_id, 'paused',
                         sent_users=results['sent'],
                         failed_users=results['failed'],
                         blocked_users=results['blocked'],
-                        progress=((i) / total) * 100
+                        progress=((i) / total) * 100 if total > 0 else 0
                     )
                     return
                 elif current_status == 'cancelled':
-                    print(f"⛔ Задача {job_id} отменена. Остановка...")
+                    print(f"⛔ Задача {job_id} отменена. Остановка на {i} сообщении...")
                     await update_job_status(
                         job_id, 'cancelled',
                         sent_users=results['sent'],
                         failed_users=results['failed'],
                         blocked_users=results['blocked'],
-                        progress=((i) / total) * 100
+                        progress=((i) / total) * 100 if total > 0 else 0
                     )
                     return
             
-            # Мониторинг CPU
             if i % 10 == 0 and i > 0:
                 cpu = psutil.cpu_percent()
                 if cpu > 80:
                     await update_job_status(job_id, 'paused', paused_at=datetime.now())
                     while psutil.cpu_percent() > 60:
                         await asyncio.sleep(5)
-                    # Проверяем, не была ли задача отменена во время паузы
                     current_status = await get_job_status(job_id)
                     if current_status == 'cancelled':
                         print(f"⛔ Задача {job_id} отменена во время паузы CPU. Остановка...")
@@ -86,7 +88,8 @@ async def process_job(job):
                 if response.status_code == 200:
                     results['sent'] += 1
                 else:
-                    if "bot was blocked" in str(response.json()).lower():
+                    error_text = str(response.json()).lower()
+                    if "bot was blocked" in error_text or "forbidden" in error_text:
                         results['blocked'] += 1
                         user_data = await database.get_user(user_id)
                         if user_data:
@@ -100,9 +103,8 @@ async def process_job(job):
             except Exception:
                 results['failed'] += 1
             
-            # Обновляем прогресс
             if i % 5 == 0 or i == total - 1:
-                progress = ((i + 1) / total) * 100
+                progress = ((i + 1) / total) * 100 if total > 0 else 0
                 await update_job_status(
                     job_id, 'running',
                     sent_users=results['sent'],
@@ -111,7 +113,6 @@ async def process_job(job):
                     progress=progress
                 )
             
-            # Скорость рассылки: 30 сообщений/сек
             if i % 30 == 0:
                 await asyncio.sleep(0.1)
     
@@ -126,19 +127,7 @@ async def process_job(job):
     )
     print(f"✅ Задача {job_id} завершена")
 
-
-async def get_job_status(job_id: int) -> str:
-    """Получить текущий статус задачи из БД"""
-    conn = await database.get_conn()
-    try:
-        row = await conn.fetchrow("SELECT status FROM broadcast_jobs WHERE id = $1", job_id)
-        return row['status'] if row else None
-    finally:
-        await database.release_conn(conn)
-
-
 async def update_job_status(job_id, status, **kwargs):
-    """Обновляет статус задачи"""
     conn = await database.get_conn()
     try:
         fields = []
@@ -152,21 +141,18 @@ async def update_job_status(job_id, status, **kwargs):
     finally:
         await database.release_conn(conn)
 
-
 async def main_loop():
-    """Главный цикл воркера"""
     print("🚀 Воркер запущен, ждём задачи...")
     while True:
         try:
             conn = await database.get_conn()
-            # Ищем задачу со статусом pending или paused (если была на паузе, но не завершена)
+            # Ищем задачи со статусом pending или paused
             job = await conn.fetchrow(
                 "SELECT * FROM broadcast_jobs WHERE status IN ('pending', 'paused') ORDER BY created_at LIMIT 1"
             )
             await database.release_conn(conn)
             
             if job:
-                # Если задача была на паузе — меняем статус на running
                 if job['status'] == 'paused':
                     print(f"▶️ Возобновляем задачу {job['id']} из паузы...")
                 print(f"📨 Найдена задача {job['id']}, начинаем обработку...")
@@ -176,7 +162,6 @@ async def main_loop():
         except Exception as e:
             print(f"❌ Ошибка: {e}")
             await asyncio.sleep(5)
-
 
 if __name__ == "__main__":
     asyncio.run(main_loop())
