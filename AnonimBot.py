@@ -88,13 +88,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
 
-    # === ОБРАБОТКА ОТВЕТА ===
     if user_id in reply_sessions:
         original_sender_id = reply_sessions.pop(user_id)
         try:
             reply_keyboard = [
                 [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
-                [InlineKeyboardButton("👀 Узнать кто это", callback_data=f"who_is_it_{user_id}")]  # ← ID отправителя
+                [InlineKeyboardButton("👀 Узнать кто это", callback_data=f"who_is_it_{user_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(reply_keyboard)
     
@@ -235,7 +234,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 print(f"Ошибка отправки ответа: {e}")
         return
 
-    # === ОТПРАВКА НОВОГО АНОНИМНОГО СООБЩЕНИЯ ===
     session = active_sessions.pop(user_id, None)
     if not session:
         await update.message.reply_text("Отправьте /start, чтобы получить свою ссылку.")
@@ -245,7 +243,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recipient_name = session['recipient_name']
 
     try:
-        # ✅ КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: добавляем ID отправителя в callback_data
         reply_keyboard = [
             [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
             [InlineKeyboardButton("👀 Узнать кто это", callback_data=f"who_is_it_{user_id}")]  # ← ID отправителя!
