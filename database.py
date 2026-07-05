@@ -66,7 +66,6 @@ async def init_db():
             )
         """)
         
-        # Таблица сообщений
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id SERIAL PRIMARY KEY,
@@ -364,20 +363,16 @@ async def set_setting(key: str, value: str):
         await release_conn(conn)
 
 async def unsubscribe_user(user_id: int, username: str = None, first_name: str = None, reason: str = 'manual'):
-    """Отписать пользователя от подписки и перенести в таблицу отписавшихся"""
     conn = await get_conn()
     try:
-        # 1. Получаем данные пользователя, если не переданы
         if not username or not first_name:
             user_data = await get_user(user_id)
             if user_data:
                 username = user_data.get('username', '')
                 first_name = user_data.get('first_name', '')
         
-        # 2. Удаляем подписку пользователя
         await conn.execute("DELETE FROM subscriptions WHERE user_id = $1", user_id)
         
-        # 3. Добавляем в таблицу отписавшихся
         await conn.execute("""
             INSERT INTO unsubscribed_users (telegram_id, username, first_name, reason, unsubscribed_at)
             VALUES ($1, $2, $3, $4, NOW())
@@ -397,7 +392,6 @@ async def unsubscribe_user(user_id: int, username: str = None, first_name: str =
 
 
 async def is_user_unsubscribed(user_id: int) -> bool:
-    """Проверить, отписался ли пользователь"""
     conn = await get_conn()
     try:
         row = await conn.fetchrow(
@@ -410,7 +404,6 @@ async def is_user_unsubscribed(user_id: int) -> bool:
 
 
 async def get_unsubscribed_users(limit: int = 100, offset: int = 0):
-    """Получить список отписавшихся пользователей"""
     conn = await get_conn()
     try:
         rows = await conn.fetch("""
@@ -424,7 +417,6 @@ async def get_unsubscribed_users(limit: int = 100, offset: int = 0):
 
 
 async def count_unsubscribed():
-    """Количество отписавшихся"""
     conn = await get_conn()
     try:
         return await conn.fetchval("SELECT COUNT(*) FROM unsubscribed_users")
