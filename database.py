@@ -111,6 +111,16 @@ async def init_db():
                 task_id TEXT
             )
         """)
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS unsubscribed_users (
+                telegram_id BIGINT PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                unsubscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reason TEXT DEFAULT 'manual'
+            )
+        """)
         
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC)")
@@ -338,7 +348,8 @@ async def get_setting(key: str, default: str = None) -> str:
     conn = await get_conn()
     try:
         row = await conn.fetchrow("SELECT value FROM settings WHERE key = $1", key)
-        return row['value'] if row else default
+        retu
+        rn row['value'] if row else default
     finally:
         await release_conn(conn)
 
@@ -349,5 +360,73 @@ async def set_setting(key: str, value: str):
             "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()",
             key, value
         )
+    finally:
+        await release_conn(conn)
+
+async def unsubscribe_user(user_id: int, username: str = None, first_name: str = None, reason: str = 'manual'):
+    """Отписать пользователя от подписки и перенести в таблицу отписавшихся"""
+    conn = await get_conn()
+    try:
+        # 1. Получаем данные пользователя, если не переданы
+        if not username or not first_name:
+            user_data = await get_user(user_id)
+            if user_data:
+                username = user_data.get('username', '')
+                first_name = user_data.get('first_name', '')
+        
+        # 2. Удаляем подписку пользователя
+        await conn.execute("DELETE FROM subscriptions WHERE user_id = $1", user_id)
+        
+        # 3. Добавляем в таблицу отписавшихся
+        await conn.execute("""
+            INSERT INTO unsubscribed_users (telegram_id, username, first_name, reason, unsubscribed_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (telegram_id) DO UPDATE SET 
+                username = $2, 
+                first_name = $3, 
+                reason = $4, 
+                unsubscribed_at = NOW()
+        """, user_id, username or '', first_name or '', reason)
+        
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка отписки: {e}")
+        return False
+    finally:
+        await release_conn(conn)
+
+
+async def is_user_unsubscribed(user_id: int) -> bool:
+    """Проверить, отписался ли пользователь"""
+    conn = await get_conn()
+    try:
+        row = await conn.fetchrow(
+            "SELECT telegram_id FROM unsubscribed_users WHERE telegram_id = $1",
+            user_id
+        )
+        return row is not None
+    finally:
+        await release_conn(conn)
+
+
+async def get_unsubscribed_users(limit: int = 100, offset: int = 0):
+    """Получить список отписавшихся пользователей"""
+    conn = await get_conn()
+    try:
+        rows = await conn.fetch("""
+            SELECT * FROM unsubscribed_users 
+            ORDER BY unsubscribed_at DESC 
+            LIMIT $1 OFFSET $2
+        """, limit, offset)
+        return [dict(row) for row in rows]
+    finally:
+        await release_conn(conn)
+
+
+async def count_unsubscribed():
+    """Количество отписавшихся"""
+    conn = await get_conn()
+    try:
+        return await conn.fetchval("SELECT COUNT(*) FROM unsubscribed_users")
     finally:
         await release_conn(conn)
