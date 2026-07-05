@@ -245,7 +245,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         reply_keyboard = [
             [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
-            [InlineKeyboardButton("👀 Узнать кто это", callback_data=f"who_is_it_{user_id}")]  # ← ID отправителя!
+            [InlineKeyboardButton("👀 Узнать кто это", callback_data=f"who_is_it_{user_id}")]
         ]
         reply_markup = InlineKeyboardMarkup(reply_keyboard)
 
@@ -450,94 +450,6 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text("❌ Отправка отменена.")
 
-async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отписаться от подписки"""
-    user = update.effective_user
-    user_id = user.id
-    username = user.username or ''
-    first_name = user.first_name or 'Пользователь'
-    
-    # Проверяем, есть ли у пользователя активная подписка
-    subscription = await database.get_subscription_by_user_id(user_id)
-    
-    if not subscription:
-        await update.message.reply_text(
-            "❌ У вас нет активной подписки для отмены.\n\n"
-            "Чтобы оформить подписку, нажмите на кнопку «👀 Узнать отправителя» в любом анонимном сообщении."
-        )
-        return
-    
-    # Проверяем, не отписался ли уже
-    if await database.is_user_unsubscribed(user_id):
-        await update.message.reply_text(
-            "ℹ️ Вы уже отписались от подписки.\n\n"
-            "Если хотите оформить подписку снова — нажмите «👀 Узнать отправителя» в любом анонимном сообщении."
-        )
-        return
-    
-    # Подтверждение
-    keyboard = [
-        [
-            InlineKeyboardButton("✅ Да, отписаться", callback_data="confirm_unsubscribe"),
-            InlineKeyboardButton("❌ Нет, передумал", callback_data="cancel_unsubscribe")
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        f"⚠️ <b>Вы уверены, что хотите отписаться от подписки?</b>\n\n"
-        f"После отписки вы больше не сможете узнавать авторов анонимных сообщений.\n\n"
-        f"Вы всегда можете оформить подписку заново, нажав на кнопку «👀 Узнать отправителя» в любом анонимном сообщении.",
-        reply_markup=reply_markup,
-        parse_mode="HTML"
-    )
-
-
-async def confirm_unsubscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Подтверждение отписки"""
-    query = update.callback_query
-    await query.answer()
-    
-    user = query.from_user
-    user_id = user.id
-    username = user.username or ''
-    first_name = user.first_name or 'Пользователь'
-    
-    # Проверяем, есть ли подписка
-    subscription = await database.get_subscription_by_user_id(user_id)
-    if not subscription:
-        await query.edit_message_text(
-            "❌ У вас нет активной подписки для отмены.",
-            parse_mode="HTML"
-        )
-        return
-    
-    # Отписываем
-    success = await database.unsubscribe_user(user_id, username, first_name, 'manual')
-    
-    if success:
-        await query.edit_message_text(
-            "✅ <b>Вы успешно отписались от подписки!</b>\n\n"
-            "Вы больше не будете получать уведомления о списаниях.\n\n"
-            "Чтобы оформить подписку снова — нажмите «👀 Узнать отправителя» в любом анонимном сообщении.",
-            parse_mode="HTML"
-        )
-    else:
-        await query.edit_message_text(
-            "❌ Произошла ошибка при отписке. Попробуйте позже или обратитесь в поддержку.",
-            parse_mode="HTML"
-        )
-
-
-async def cancel_unsubscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отмена отписки"""
-    query = update.callback_query
-    await query.answer()
-    
-    await query.edit_message_text(
-        "✅ Отписка отменена. Ваша подписка активна.",
-        parse_mode="HTML"
-    )
 
 async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -625,6 +537,13 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     user_id = query.from_user.id
+    
+    if await database.is_user_unsubscribed(user_id):
+        await query.edit_message_text(
+            text="❌ Вы отписались от подписки.\n\nЧтобы оформить подписку снова — нажмите «👀 Узнать отправителя» в любом анонимном сообщении.",
+            parse_mode="HTML"
+        )
+        return
     
     subscription = await database.get_subscription_by_user_id(user_id)
     is_active = False
@@ -748,6 +667,88 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отписаться от подписки"""
+    user = update.effective_user
+    user_id = user.id
+    username = user.username or ''
+    first_name = user.first_name or 'Пользователь'
+    
+    subscription = await database.get_subscription_by_user_id(user_id)
+    
+    if not subscription:
+        await update.message.reply_text(
+            "❌ У вас нет активной подписки для отмены.\n\n"
+            "Чтобы оформить подписку, нажмите на кнопку «👀 Узнать отправителя» в любом анонимном сообщении."
+        )
+        return
+    
+    if await database.is_user_unsubscribed(user_id):
+        await update.message.reply_text(
+            "ℹ️ Вы уже отписались от подписки.\n\n"
+            "Если хотите оформить подписку снова — нажмите «👀 Узнать отправителя» в любом анонимном сообщении."
+        )
+        return
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Да, отписаться", callback_data="confirm_unsubscribe"),
+            InlineKeyboardButton("❌ Нет, передумал", callback_data="cancel_unsubscribe")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        f"⚠️ <b>Вы уверены, что хотите отписаться от подписки?</b>\n\n"
+        f"После отписки вы больше не сможете узнавать авторов анонимных сообщений.\n\n"
+        f"Вы всегда можете оформить подписку заново, нажав на кнопку «👀 Узнать отправителя» в любом анонимном сообщении.",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+
+
+async def confirm_unsubscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user = query.from_user
+    user_id = user.id
+    username = user.username or ''
+    first_name = user.first_name or 'Пользователь'
+    
+    subscription = await database.get_subscription_by_user_id(user_id)
+    if not subscription:
+        await query.edit_message_text(
+            "❌ У вас нет активной подписки для отмены.",
+            parse_mode="HTML"
+        )
+        return
+        
+    success = await database.unsubscribe_user(user_id, username, first_name, 'manual')
+    
+    if success:
+        await query.edit_message_text(
+            "✅ <b>Вы успешно отписались от подписки!</b>\n\n"
+            "Вы больше не будете получать уведомления о списаниях.\n\n"
+            "Чтобы оформить подписку снова — нажмите «👀 Узнать отправителя» в любом анонимном сообщении.",
+            parse_mode="HTML"
+        )
+    else:
+        await query.edit_message_text(
+            "❌ Произошла ошибка при отписке. Попробуйте позже или обратитесь в поддержку.",
+            parse_mode="HTML"
+        )
+
+
+async def cancel_unsubscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text(
+        "✅ Отписка отменена. Ваша подписка активна.",
+        parse_mode="HTML"
+    )
+
 
 def main():
     import asyncio
@@ -760,12 +761,12 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("info", info_command))
+    app.add_handler(CommandHandler("unsub", unsubscribe_command))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(cancel_handler, pattern="cancel"))
     app.add_handler(CallbackQueryHandler(send_again_handler, pattern="send_again_"))
     app.add_handler(CallbackQueryHandler(reply_anon_handler, pattern="reply_"))
     app.add_handler(CallbackQueryHandler(who_is_it_handler, pattern="who_is_it"))
-    app.add_handler(CommandHandler("unsub", unsubscribe_command))
     app.add_handler(CallbackQueryHandler(confirm_unsubscribe_handler, pattern="confirm_unsubscribe"))
     app.add_handler(CallbackQueryHandler(cancel_unsubscribe_handler, pattern="cancel_unsubscribe"))
 
