@@ -81,7 +81,7 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
-                subscription_id TEXT,  -- ← ДОБАВЛЕНО: ID подписки из CloudPayments
+                subscription_id TEXT,
                 plan TEXT NOT NULL,
                 start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 end_date TIMESTAMP,
@@ -110,7 +110,7 @@ async def init_db():
                 task_id TEXT
             )
         """)
-
+        
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS unsubscribed_users (
                 telegram_id BIGINT PRIMARY KEY,
@@ -126,6 +126,7 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_status ON broadcast_jobs(status)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_unsubscribed_users_id ON unsubscribed_users(telegram_id)")
         
         print("✅ База данных инициализирована")
     finally:
@@ -177,7 +178,6 @@ async def count_users():
     finally:
         await release_conn(conn)
 
-
 async def save_message(sender_id: int, recipient_id: int, content: str, content_type: str = 'text'):
     conn = await get_conn()
     try:
@@ -187,6 +187,7 @@ async def save_message(sender_id: int, recipient_id: int, content: str, content_
         )
     finally:
         await release_conn(conn)
+
 
 async def add_blocked_user(user_id: int, username: str, first_name: str):
     conn = await get_conn()
@@ -233,7 +234,6 @@ async def is_user_blocked(user_id: int):
         return row is not None
     finally:
         await release_conn(conn)
-
 
 async def get_subscription_by_user_id(user_id: int):
     conn = await get_conn()
@@ -347,8 +347,7 @@ async def get_setting(key: str, default: str = None) -> str:
     conn = await get_conn()
     try:
         row = await conn.fetchrow("SELECT value FROM settings WHERE key = $1", key)
-        retu
-        rn row['value'] if row else default
+        return row['value'] if row else default
     finally:
         await release_conn(conn)
 
