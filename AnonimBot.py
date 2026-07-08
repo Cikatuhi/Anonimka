@@ -578,7 +578,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sender_id = None
     
     if sender_id:
-        sender_data = await database.get_user(sender_id)
+    sender_data = await database.get_user(sender_id)
         if sender_data:
             username = sender_data.get('username', 'без_юзернейма')
             first_name = sender_data.get('first_name', 'Пользователь')
@@ -588,13 +588,19 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Знакомы вы с этим пользователем?\n\n"
                 f"<b>Логин пользователя:</b> @{username}\n"
                 f"<b>Его идентификатор в Telegram:</b> <code>{sender_id}</code>\n\n"
-                f"Перейти в профиль пользователя, можно по нажатию на кнопку ниже."
             )
             
-            keyboard = [
-                [InlineKeyboardButton("👤 Перейти в профиль", url=f"tg://user?id={sender_id}")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            keyboard = None
+            if username and username != 'без_юзернейма':
+                keyboard = [
+                    [InlineKeyboardButton("👤 Перейти в профиль", url=f"https://t.me/{username}")]
+                ]
+            else:
+                keyboard = [
+                    [InlineKeyboardButton("👤 Перейти в профиль", url=f"tg://user?id={sender_id}")]
+                ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
             
             await query.edit_message_text(
                 text=text,
