@@ -538,13 +538,6 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = query.from_user.id
     
-    if await database.is_user_unsubscribed(user_id):
-        await query.edit_message_text(
-            text="❌ Вы отписались от подписки.\n\nЧтобы оформить подписку снова — нажмите «👀 Узнать отправителя» в любом анонимном сообщении.",
-            parse_mode="HTML"
-        )
-        return
-    
     subscription = await database.get_subscription_by_user_id(user_id)
     is_active = False
     if subscription:
@@ -564,10 +557,18 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("👀 Узнать отправителя", url=payment_link)]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(
-            chat_id=query.from_user.id,
+        
+        await query.edit_message_text(
             text=text,
             reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+        return
+    
+    if await database.is_user_unsubscribed(user_id):
+        await query.edit_message_text(
+            text="❌ Вы отписались от подписки.\n\n"
+                 "Чтобы оформить подписку снова — нажмите «👀 Узнать отправителя» в любом анонимном сообщении.",
             parse_mode="HTML"
         )
         return
