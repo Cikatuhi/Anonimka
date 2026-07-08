@@ -566,12 +566,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if await database.is_user_unsubscribed(user_id):
-        await query.edit_message_text(
-            text="❌ Вы отписались от подписки.\n\n"
-                 "Чтобы оформить подписку снова — нажмите «👀 Узнать отправителя» в любом анонимном сообщении.",
-            parse_mode="HTML"
-        )
-        return
+        await database.remove_from_unsubscribed(user_id)
     
     callback_data = query.data
     sender_id = None
