@@ -479,6 +479,18 @@ async def get_unsubscribed_users(limit: int = 100, offset: int = 0):
     finally:
         await release_conn(conn)
 
+async def remove_from_unsubscribed(user_id: int):
+    """Удалить пользователя из таблицы отписавшихся (при повторной подписке)"""
+    conn = await get_conn()
+    try:
+        await conn.execute("DELETE FROM unsubscribed_users WHERE telegram_id = $1", user_id)
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка удаления из отписавшихся: {e}")
+        return False
+    finally:
+        await release_conn(conn)
+
 
 async def count_unsubscribed():
     """Количество отписавшихся"""
