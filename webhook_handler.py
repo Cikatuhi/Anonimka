@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Request, HTTPException
 import json
 import logging
-
+from datetime import datetime, timedelta
 from subscription import SubscriptionManager
+import database 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -21,21 +22,52 @@ async def handle_webhook(request: Request):
         
         model = body.get("Model", {})
         
+        account_id = model.get("AccountId")
+        status = model.get("Status")
         amount_rub = model.get("Amount", 0)
+        is_recurrent = model.get("IsRecurrent", False)
         
+        if status == "Completed" and account_id:
+            try:
+                user_id = int(account_id)
+                logger.info(f"✅ Успешная оплата для пользователя {user_id}")
+                
+                existing_subscription = await database.get_subscription_by_user_id(user_id)
+                
+                if existing_subscription:
+                    end_date = datetime.now() + timedelta(days=7)
+                    await database.update_subscription_status(user_id, 'active', end_date)
+                    await database.update_subscription_plan(user_id, 'HIGH')
+                    logger.info(f"✅ Обновлена подписка для пользователя {user_id}")
+                else:
+                    end_date = datetime.now() + timedelta(days=7)
+                    await database.create_subscription(user_id, 'HIGH', 'active', end_date)
+                    logger.info(f"✅ Создана подписка для пользователя {user_id}")
+                
+                try:
+                    await database.remove_from_unsubscribed(user_id)
+                    logger.info(f"✅ Пользователь {user_id} удалён из отписавшихся")
+                except Exception as e:
+                    logger.warning(f"⚠️ Не удалось удалить из отписавшихся: {e}")
+                
+
+                return {"status": "ok", "message": "Subscription activated"}
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка выдачи подписки: {e}")
+                
         payload = {
-            "AccountId": model.get("AccountId"),
-            "Amount": amount_rub,  # Оставляем в рублях для совместимости
-            "Status": model.get("Status"),
+            "AccountId": account_id,
+            "Amount": amount_rub,
+            "Status": status,
             "TransactionId": model.get("TransactionId"),
             "SubscriptionId": model.get("SubscriptionId"),
-            "IsRecurrent": model.get("IsRecurrent", False),
+            "IsRecurrent": is_recurrent,
             "ReasonCode": model.get("ReasonCode"),
             "CardToken": model.get("Token")
         }
         
         result = await subscription_manager.handle_payment_webhook(payload)
-        
         logger.info(f"Webhook processed for user {payload.get('AccountId')}: {result.get('message', '')}")
         
         return {"status": "processed", "result": result}
@@ -46,6 +78,7 @@ async def handle_webhook(request: Request):
     except Exception as e:
         logger.error(f"Error processing webhook: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
+
 
 @router.post("/subscription/init")
 async def initialize_subscription(request: Request):
@@ -64,14 +97,16 @@ async def initialize_subscription(request: Request):
         logger.error(f"Error initializing subscription: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/subscription/daily-retry/{user_id}")
 async def trigger_daily_retry(user_id: str):
     result = await subscription_manager.handle_daily_low_retry(user_id)
     return result
 
+
 @router.get("/subscription/{user_id}")
 async def get_subscription_status(user_id: str):
-    subscription = subscription_manager.get_user_subscription(user_id)
+    subscription = await subscription_manager.get_user_subscription(user_id)  # ← ДОБАВЛЕН await
     
     if not subscription:
         return {
@@ -82,25 +117,25 @@ async def get_subscription_status(user_id: str):
     return {
         "success": True,
         "user_id": user_id,
-        "status": subscription.status,
-        "current_plan": subscription.current_plan.value if subscription.current_plan else None,
-        "current_amount": subscription.current_amount / 100 if subscription.current_amount else 0,
-        "active_until": subscription.active_until.isoformat() if subscription.active_until else None,
-        "successful_payments": subscription.successful_payments,
-        "failed_payments": subscription.failed_payments,
-        "cascade_attempts": subscription.cascade_attempts
+        "status": subscription.get('status'),
+        "plan": subscription.get('plan'),
+        "end_date": subscription.get('end_date').isoformat() if subscription.get('end_date') else None,
+        "created_at": subscription.get('created_at').isoformat() if subscription.get('created_at') else None
     }
+
 
 @router.post("/subscription/cancel/{user_id}")
 async def cancel_subscription(user_id: str):
-    subscription = subscription_manager.get_user_subscription(user_id)
+    subscription = await subscription_manager.get_user_subscription(user_id)
+    
     if not subscription:
         return {"success": False, "message": "User not found"}
     
-    if subscription.subscription_id:
-        result = await subscription_manager.client.cancel_subscription(subscription.subscription_id)
+    subscription_id = subscription.get('subscription_id')
+    if subscription_id:
+        result = await subscription_manager.client.cancel_subscription(subscription_id)
         if result["success"]:
-            subscription.status = SubscriptionStatus.CANCELLED
+            await database.update_subscription_status(int(user_id), 'cancelled')  # ← ДОБАВЛЕНО
             return {"success": True, "message": "Subscription cancelled"}
         else:
             return {"success": False, "error": result.get("error")}
