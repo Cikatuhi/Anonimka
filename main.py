@@ -21,7 +21,8 @@ scheduler = AsyncIOScheduler()
 async def daily_retry_job():
     logger.info("Running daily retry job for all users in RETRY_LOW status (infinite attempts)")
     
-    users = subscription_manager.get_all_users_in_retry_low()
+    # ===== ИСПРАВЛЕНО: добавлен await =====
+    users = await subscription_manager.get_all_users_in_retry_low()
     
     if not users:
         logger.info("No users in RETRY_LOW status")
@@ -41,10 +42,9 @@ async def daily_retry_job():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Запускаем планировщик при старте
     scheduler.add_job(
         daily_retry_job,
-        trigger=CronTrigger(hour=0, minute=0),  # Каждый день в 00:00
+        trigger=CronTrigger(hour=0, minute=0),
         id="daily_retry",
         replace_existing=True
     )
@@ -85,7 +85,7 @@ async def health_check():
         "status": "healthy",
         "scheduler_running": scheduler.running,
         "subscriptions_count": len(subscription_manager._subscriptions),
-        "retry_low_count": len(subscription_manager.get_all_users_in_retry_low())
+        "retry_low_count": len(await subscription_manager.get_all_users_in_retry_low())  # ← тоже нужно исправить
     }
 
 if __name__ == "__main__":
