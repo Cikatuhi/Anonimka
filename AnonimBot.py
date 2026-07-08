@@ -668,12 +668,13 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отписаться от подписки"""
+    """Отписаться от подписки (удалить премиум)"""
     user = update.effective_user
     user_id = user.id
     username = user.username or ''
     first_name = user.first_name or 'Пользователь'
     
+    # Проверяем, есть ли у пользователя активная подписка
     subscription = await database.get_subscription_by_user_id(user_id)
     
     if not subscription:
@@ -683,6 +684,7 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     
+    # Проверяем, не отписался ли уже
     if await database.is_user_unsubscribed(user_id):
         await update.message.reply_text(
             "ℹ️ Вы уже отписались от подписки.\n\n"
@@ -690,6 +692,7 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     
+    # Подтверждение
     keyboard = [
         [
             InlineKeyboardButton("✅ Да, отписаться", callback_data="confirm_unsubscribe"),
@@ -708,6 +711,7 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def confirm_unsubscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Подтверждение отписки — удаляем премиум"""
     query = update.callback_query
     await query.answer()
     
@@ -716,6 +720,7 @@ async def confirm_unsubscribe_handler(update: Update, context: ContextTypes.DEFA
     username = user.username or ''
     first_name = user.first_name or 'Пользователь'
     
+    # Проверяем, есть ли подписка
     subscription = await database.get_subscription_by_user_id(user_id)
     if not subscription:
         await query.edit_message_text(
@@ -723,12 +728,14 @@ async def confirm_unsubscribe_handler(update: Update, context: ContextTypes.DEFA
             parse_mode="HTML"
         )
         return
-        
+    
+    # Отписываем (удаляем подписку и переносим в таблицу отписавшихся)
     success = await database.unsubscribe_user(user_id, username, first_name, 'manual')
     
     if success:
         await query.edit_message_text(
             "✅ <b>Вы успешно отписались от подписки!</b>\n\n"
+            "Премиум-доступ отключён.\n"
             "Вы больше не будете получать уведомления о списаниях.\n\n"
             "Чтобы оформить подписку снова — нажмите «👀 Узнать отправителя» в любом анонимном сообщении.",
             parse_mode="HTML"
@@ -741,6 +748,7 @@ async def confirm_unsubscribe_handler(update: Update, context: ContextTypes.DEFA
 
 
 async def cancel_unsubscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отмена отписки"""
     query = update.callback_query
     await query.answer()
     
