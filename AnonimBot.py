@@ -578,7 +578,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sender_id = None
     
     if sender_id:
-    sender_data = await database.get_user(sender_id)
+        sender_data = await database.get_user(sender_id)
         if sender_data:
             username = sender_data.get('username', 'без_юзернейма')
             first_name = sender_data.get('first_name', 'Пользователь')
