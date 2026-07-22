@@ -511,3 +511,27 @@ async def count_unsubscribed():
         return await conn.fetchval("SELECT COUNT(*) FROM unsubscribed_users")
     finally:
         await release_conn(conn)
+
+async def has_user_seen_premium_offer(user_id: int) -> bool:
+    """Проверить, видел ли пользователь предложение Премиум"""
+    conn = await get_conn()
+    try:
+        row = await conn.fetchrow(
+            "SELECT has_seen_premium_offer FROM users WHERE telegram_id = $1",
+            user_id
+        )
+        return row['has_seen_premium_offer'] if row else False
+    finally:
+        await release_conn(conn)
+
+
+async def mark_premium_offer_as_seen(user_id: int):
+    """Отметить, что пользователь видел предложение Премиум"""
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            "UPDATE users SET has_seen_premium_offer = TRUE WHERE telegram_id = $1",
+            user_id
+        )
+    finally:
+        await release_conn(conn)
