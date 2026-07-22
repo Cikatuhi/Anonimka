@@ -538,6 +538,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = query.from_user.id
     
+    # Проверяем, есть ли подписка
     subscription = await database.get_subscription_by_user_id(user_id)
     is_active = False
     if subscription:
@@ -548,26 +549,85 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif status == 'active' and end_date is None:
             is_active = True
     
-    if not is_active:
-        payment_link = f"http://201.51.11.220:8001/{user_id}"
+    # ЕСЛИ ПОДПИСКА ЕСТЬ → ПОКАЗЫВАЕМ ОТПРАВИТЕЛЯ
+    if is_active:
+        await show_sender(query, user_id)
+        return
+    
+    # ЕСЛИ ПОДПИСКИ НЕТ → ПРОВЕРЯЕМ, ВИДЕЛ ЛИ ПОЛЬЗОВАТЕЛЬ ПРЕДЛОЖЕНИЕ
+    has_seen = await database.has_user_seen_premium_offer(user_id)
+    
+    # ЕСЛИ НЕ ВИДЕЛ → ПОКАЗЫВАЕМ ТЕКСТ С ЧЕКБОКСАМИ (ТОЛЬКО 1 РАЗ)
+    if not has_seen:
+        # Отмечаем, что пользователь видел предложение
+        await database.mark_premium_offer_as_seen(user_id)
+        
         text = (
-            f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
+            "💌 <b>Узнайте кто отправил это послание - приобретите пробный Премиум за 5₽ на 1 день</b> 👇\n\n"
+            "✅ Нажимая кнопку, вы принимаете условия <a href='http://201.51.11.220:8001/doc2'>лицензионного соглашения</a>.\n\n"
+            "✅ Нажимая кнопку, вы принимаете условия продления. Дальнейший тариф: 299₽ каждые 1 день по истечению пробного периода. Отключить можно в любой момент.\n\n"
+            "✅ Нажимая кнопку, вы даете согласие на обработку данных и подтверждаете ознакомление с <a href='http://201.51.11.220:8001/doc1'>политикой конфиденциальности</a>."
         )
+        
         keyboard = [
-            [InlineKeyboardButton("👀 Узнать отправителя", url=payment_link)]
+            [InlineKeyboardButton("💳 Получить Премиум", callback_data="buy_premium")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
             text=text,
             reply_markup=reply_markup,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            disable_web_page_preview=True
         )
         return
     
-    if await database.is_user_unsubscribed(user_id):
-        await database.remove_from_unsubscribed(user_id)
+    # ЕСЛИ ПОДПИСКИ НЕТ И ПРЕДЛОЖЕНИЕ УЖЕ ПОКАЗАНО → ПРЕДЛАГАЕМ ОПЛАТИТЬ (СТАНДАРТНЫЙ ВАРИАНТ)
+    payment_link = f"http://201.51.11.220:8001/{user_id}"
+    text = (
+        f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
+    )
+    keyboard = [
+        [InlineKeyboardButton("👀 Узнать отправителя", url=payment_link)]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
+    await query.edit_message_text(
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+
+
+async def buy_premium_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик нажатия на кнопку 'Получить Премиум' после чекбоксов"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    
+    # Генерируем ссылку на оплату
+    payment_link = f"http://201.51.11.220:8001/{user_id}"
+    
+    text = (
+        f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
+        f"Нажмите на кнопку ниже, чтобы оплатить."
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("💳 Оплатить 5₽", url=payment_link)]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+
+
+async def show_sender(query, user_id):
+    """Показать отправителя (реального или рандомного)"""
     callback_data = query.data
     sender_id = None
     
@@ -609,6 +669,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
     
+    # Рандомный пользователь
     all_users = await database.get_all_users(limit=1000)
     available_users = [u for u in all_users if u != user_id]
     
@@ -650,7 +711,6 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
-
 
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -779,6 +839,7 @@ def main():
     app.add_handler(CallbackQueryHandler(who_is_it_handler, pattern="who_is_it"))
     app.add_handler(CallbackQueryHandler(confirm_unsubscribe_handler, pattern="confirm_unsubscribe"))
     app.add_handler(CallbackQueryHandler(cancel_unsubscribe_handler, pattern="cancel_unsubscribe"))
+    app.add_handler(CallbackQueryHandler(buy_premium_handler, pattern="buy_premium"))
 
     print("🤖 Бот запущен и готов к приёму анонимных сообщений...")
     app.run_polling()
