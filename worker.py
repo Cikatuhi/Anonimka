@@ -24,6 +24,15 @@ async def process_job(job):
     user_ids = json.loads(job['user_ids_json'])
     message = job['message']
     
+    await update_job_status(job_id, 'running', started_at=datetime.now())
+    
+    total = len(user_ids)
+    results = {'sent': 0, 'failed': 0, 'blocked': 0}
+    
+    job_id = job['id']
+    user_ids = json.loads(job['user_ids_json'])
+    message = job['message']
+    
     total = len(user_ids)
     results = {'sent': 0, 'failed': 0, 'blocked': 0}
     
