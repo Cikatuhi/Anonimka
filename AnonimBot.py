@@ -538,7 +538,6 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = query.from_user.id
     
-    # Проверяем, есть ли подписка
     subscription = await database.get_subscription_by_user_id(user_id)
     is_active = False
     if subscription:
@@ -549,17 +548,13 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif status == 'active' and end_date is None:
             is_active = True
     
-    # ЕСЛИ ПОДПИСКА ЕСТЬ → ПОКАЗЫВАЕМ ОТПРАВИТЕЛЯ
     if is_active:
         await show_sender(query, user_id)
         return
     
-    # ЕСЛИ ПОДПИСКИ НЕТ → ПРОВЕРЯЕМ, ВИДЕЛ ЛИ ПОЛЬЗОВАТЕЛЬ ПРЕДЛОЖЕНИЕ
     has_seen = await database.has_user_seen_premium_offer(user_id)
     
-    # ЕСЛИ НЕ ВИДЕЛ → ПОКАЗЫВАЕМ ТЕКСТ С ЧЕКБОКСАМИ (ТОЛЬКО 1 РАЗ)
     if not has_seen:
-        # Отмечаем, что пользователь видел предложение
         await database.mark_premium_offer_as_seen(user_id)
         
         text = (
@@ -582,8 +577,8 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # ЕСЛИ ПОДПИСКИ НЕТ И ПРЕДЛОЖЕНИЕ УЖЕ ПОКАЗАНО → ПРЕДЛАГАЕМ ОПЛАТИТЬ (СТАНДАРТНЫЙ ВАРИАНТ)
-    payment_link = f"http://201.51.11.220:8001/{user_id}"
+    payment_token = await database.generate_payment_token(user_id)
+    payment_link = f"http://201.51.11.220:8001/pay/{payment_token}"
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
     )
@@ -606,8 +601,8 @@ async def buy_premium_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     user_id = query.from_user.id
     
-    # Генерируем ссылку на оплату
-    payment_link = f"http://201.51.11.220:8001/{user_id}"
+    payment_token = await database.generate_payment_token(user_id)
+    payment_link = f"http://201.51.11.220:8001/pay/{payment_token}"
     
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
@@ -669,7 +664,6 @@ async def show_sender(query, user_id):
             )
             return
     
-    # Рандомный пользователь
     all_users = await database.get_all_users(limit=1000)
     available_users = [u for u in all_users if u != user_id]
     
@@ -736,7 +730,6 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     username = user.username or ''
     first_name = user.first_name or 'Пользователь'
     
-    # Проверяем, есть ли у пользователя активная подписка
     subscription = await database.get_subscription_by_user_id(user_id)
     
     if not subscription:
@@ -746,7 +739,6 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     
-    # Проверяем, не отписался ли уже
     if await database.is_user_unsubscribed(user_id):
         await update.message.reply_text(
             "ℹ️ Вы уже отписались от подписки.\n\n"
@@ -754,7 +746,6 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     
-    # Подтверждение
     keyboard = [
         [
             InlineKeyboardButton("✅ Да, отписаться", callback_data="confirm_unsubscribe"),
@@ -782,7 +773,6 @@ async def confirm_unsubscribe_handler(update: Update, context: ContextTypes.DEFA
     username = user.username or ''
     first_name = user.first_name or 'Пользователь'
     
-    # Проверяем, есть ли подписка
     subscription = await database.get_subscription_by_user_id(user_id)
     if not subscription:
         await query.edit_message_text(
@@ -790,8 +780,7 @@ async def confirm_unsubscribe_handler(update: Update, context: ContextTypes.DEFA
             parse_mode="HTML"
         )
         return
-    
-    # Отписываем (удаляем подписку и переносим в таблицу отписавшихся)
+    )
     success = await database.unsubscribe_user(user_id, username, first_name, 'manual')
     
     if success:
