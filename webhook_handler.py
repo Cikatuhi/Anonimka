@@ -17,7 +17,6 @@ async def handle_webhook(request: Request):
         
         event_type = body.get("EventType")
         if event_type not in ["Payment", "Recurrent"]:
-            logger.info(f"Ignoring event: {event_type}")
             return {"status": "ignored"}
         
         model = body.get("Model", {})
@@ -26,7 +25,7 @@ async def handle_webhook(request: Request):
         status = model.get("Status")
         amount_rub = model.get("Amount", 0)
         is_recurrent = model.get("IsRecurrent", False)
-        card_token = model.get("Token") 
+        card_token = model.get("Token")
         
         if status == "Completed" and account_id:
             try:
@@ -54,11 +53,10 @@ async def handle_webhook(request: Request):
                         card_token=card_token,
                         subscription_id=model.get("SubscriptionId")
                     )
-                    logger.info(f"✅ Создана подписка для пользователя {user_id} с токеном карты")
+                    logger.info(f"✅ Создана подписка для пользователя {user_id} с Card Token")
                 
                 try:
                     await database.remove_from_unsubscribed(user_id)
-                    logger.info(f"✅ Пользователь {user_id} удалён из отписавшихся")
                 except Exception as e:
                     logger.warning(f"⚠️ Не удалось удалить из отписавшихся: {e}")
                 
