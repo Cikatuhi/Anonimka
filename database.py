@@ -1,5 +1,6 @@
 import asyncpg
 import os
+import secrets
 from dotenv import load_dotenv
 import asyncio
 
@@ -53,7 +54,8 @@ async def init_db():
                 telegram_id BIGINT PRIMARY KEY,
                 username TEXT,
                 first_name TEXT,
-                registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                has_seen_premium_offer BOOLEAN DEFAULT FALSE
             )
         """)
         
@@ -82,6 +84,7 @@ async def init_db():
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
                 subscription_id TEXT,
+                card_token TEXT,
                 plan TEXT NOT NULL,
                 start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 end_date TIMESTAMP,
@@ -121,17 +124,31 @@ async def init_db():
             )
         """)
         
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS payment_tokens (
+                id SERIAL PRIMARY KEY,
+                token TEXT UNIQUE NOT NULL,
+                user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                used BOOLEAN DEFAULT FALSE,
+                expires_at TIMESTAMP DEFAULT (NOW() + INTERVAL '1 hour')
+            )
+        """)
+        
+        # Индексы
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_status ON broadcast_jobs(status)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_unsubscribed_users_id ON unsubscribed_users(telegram_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_tokens_token ON payment_tokens(token)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_tokens_user_id ON payment_tokens(user_id)")
         
         print("✅ База данных инициализирована")
     finally:
         await release_conn(conn)
-
+        
 async def register_user(user_id: int, username: str, first_name: str):
     conn = await get_conn()
     try:
@@ -141,7 +158,7 @@ async def register_user(user_id: int, username: str, first_name: str):
         )
         if not result:
             await conn.execute(
-                "INSERT INTO users (telegram_id, username, first_name) VALUES ($1, $2, $3)",
+                "INSERT INTO users (telegram_id, username, first_name, registered_at) VALUES ($1, $2, $3, NOW())",
                 user_id, username, first_name
             )
             return True
@@ -178,6 +195,27 @@ async def count_users():
     finally:
         await release_conn(conn)
 
+async def has_user_seen_premium_offer(user_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        row = await conn.fetchrow(
+            "SELECT has_seen_premium_offer FROM users WHERE telegram_id = $1",
+            user_id
+        )
+        return row['has_seen_premium_offer'] if row else False
+    finally:
+        await release_conn(conn)
+
+async def mark_premium_offer_as_seen(user_id: int):
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            "UPDATE users SET has_seen_premium_offer = TRUE WHERE telegram_id = $1",
+            user_id
+        )
+    finally:
+        await release_conn(conn)
+
 async def save_message(sender_id: int, recipient_id: int, content: str, content_type: str = 'text'):
     conn = await get_conn()
     try:
@@ -187,7 +225,6 @@ async def save_message(sender_id: int, recipient_id: int, content: str, content_
         )
     finally:
         await release_conn(conn)
-
 
 async def add_blocked_user(user_id: int, username: str, first_name: str):
     conn = await get_conn()
@@ -246,14 +283,21 @@ async def get_subscription_by_user_id(user_id: int):
     finally:
         await release_conn(conn)
 
-async def create_subscription(user_id: int, plan: str, status: str = 'active', end_date=None):
+async def create_subscription(
+    user_id: int, 
+    plan: str, 
+    status: str = 'active', 
+    end_date=None,
+    card_token: str = None,
+    subscription_id: str = None
+):
     conn = await get_conn()
     try:
-        await conn.execute(
-            """INSERT INTO subscriptions (user_id, plan, status, end_date, created_at)
-               VALUES ($1, $2, $3, $4, NOW())""",
-            user_id, plan, status, end_date
-        )
+        await conn.execute("""
+            INSERT INTO subscriptions 
+            (user_id, plan, status, end_date, card_token, subscription_id, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        """, user_id, plan, status, end_date, card_token, subscription_id)
     finally:
         await release_conn(conn)
 
@@ -299,6 +343,27 @@ async def save_cloudpayments_subscription_id(user_id: int, subscription_id: str)
     finally:
         await release_conn(conn)
 
+async def save_card_token(user_id: int, card_token: str):
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            "UPDATE subscriptions SET card_token = $1 WHERE user_id = $2",
+            card_token, user_id
+        )
+    finally:
+        await release_conn(conn)
+
+async def get_card_token(user_id: int) -> str:
+    conn = await get_conn()
+    try:
+        row = await conn.fetchrow(
+            "SELECT card_token FROM subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+            user_id
+        )
+        return row['card_token'] if row else None
+    finally:
+        await release_conn(conn)
+
 async def get_all_users_in_retry_low():
     conn = await get_conn()
     try:
@@ -331,6 +396,7 @@ async def get_all_subscriptions(limit: int = 100, offset: int = 0):
         return [dict(row) for row in rows]
     finally:
         await release_conn(conn)
+
 
 async def get_users_batch(limit: int = 1000, offset: int = 0):
     conn = await get_conn()
@@ -389,7 +455,6 @@ async def unsubscribe_user(user_id: int, username: str = None, first_name: str =
     finally:
         await release_conn(conn)
 
-
 async def is_user_unsubscribed(user_id: int) -> bool:
     conn = await get_conn()
     try:
@@ -400,7 +465,6 @@ async def is_user_unsubscribed(user_id: int) -> bool:
         return row is not None
     finally:
         await release_conn(conn)
-
 
 async def get_unsubscribed_users(limit: int = 100, offset: int = 0):
     conn = await get_conn()
@@ -414,7 +478,6 @@ async def get_unsubscribed_users(limit: int = 100, offset: int = 0):
     finally:
         await release_conn(conn)
 
-
 async def count_unsubscribed():
     conn = await get_conn()
     try:
@@ -422,116 +485,46 @@ async def count_unsubscribed():
     finally:
         await release_conn(conn)
 
-
-async def unsubscribe_user(user_id: int, username: str = None, first_name: str = None, reason: str = 'manual'):
-    """Отписать пользователя от подписки и перенести в таблицу отписавшихся"""
+async def remove_from_unsubscribed(user_id: int):
     conn = await get_conn()
     try:
-        if not username or not first_name:
-            user_data = await get_user(user_id)
-            if user_data:
-                username = user_data.get('username', '')
-                first_name = user_data.get('first_name', '')
-        
-        await conn.execute("DELETE FROM subscriptions WHERE user_id = $1", user_id)
-        
+        await conn.execute("DELETE FROM unsubscribed_users WHERE telegram_id = $1", user_id)
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка удаления из отписавшихся: {e}")
+        return False
+    finally:
+        await release_conn(conn)
+
+async def generate_payment_token(user_id: int) -> str:
+    conn = await get_conn()
+    try:
+        token = secrets.token_urlsafe(32)
         await conn.execute("""
-            INSERT INTO unsubscribed_users (telegram_id, username, first_name, reason, unsubscribed_at)
-            VALUES ($1, $2, $3, $4, NOW())
-            ON CONFLICT (telegram_id) DO UPDATE SET 
-                username = $2, 
-                first_name = $3, 
-                reason = $4, 
-                unsubscribed_at = NOW()
-        """, user_id, username or '', first_name or '', reason)
-        
+            INSERT INTO payment_tokens (token, user_id, expires_at)
+            VALUES ($1, $2, NOW() + INTERVAL '1 hour')
+        """, token, user_id)
+        return token
+    finally:
+        await release_conn(conn)
+
+async def get_user_by_payment_token(token: str) -> int:
+    conn = await get_conn()
+    try:
+        row = await conn.fetchrow("""
+            SELECT user_id FROM payment_tokens 
+            WHERE token = $1 AND used = FALSE AND expires_at > NOW()
+        """, token)
+        return row['user_id'] if row else None
+    finally:
+        await release_conn(conn)
+
+async def mark_payment_token_as_used(token: str) -> bool:
+    conn = await get_conn()
+    try:
+        await conn.execute("""
+            UPDATE payment_tokens SET used = TRUE WHERE token = $1
+        """, token)
         return True
-    except Exception as e:
-        print(f"❌ Ошибка отписки: {e}")
-        return False
-    finally:
-        await release_conn(conn)
-
-
-async def is_user_unsubscribed(user_id: int) -> bool:
-    """Проверить, отписался ли пользователь"""
-    conn = await get_conn()
-    try:
-        row = await conn.fetchrow(
-            "SELECT telegram_id FROM unsubscribed_users WHERE telegram_id = $1",
-            user_id
-        )
-        return row is not None
-    finally:
-        await release_conn(conn)
-
-
-async def get_unsubscribed_users(limit: int = 100, offset: int = 0):
-    """Получить список отписавшихся пользователей"""
-    conn = await get_conn()
-    try:
-        rows = await conn.fetch("""
-            SELECT * FROM unsubscribed_users 
-            ORDER BY unsubscribed_at DESC 
-            LIMIT $1 OFFSET $2
-        """, limit, offset)
-        return [dict(row) for row in rows]
-    finally:
-        await release_conn(conn)
-
-async def remove_from_unsubscribed(user_id: int):
-    """Удалить пользователя из таблицы отписавшихся (при повторной подписке)"""
-    conn = await get_conn()
-    try:
-        await conn.execute("DELETE FROM unsubscribed_users WHERE telegram_id = $1", user_id)
-        return True
-    except Exception as e:
-        print(f"❌ Ошибка удаления из отписавшихся: {e}")
-        return False
-    finally:
-        await release_conn(conn)
-
-async def remove_from_unsubscribed(user_id: int):
-    """Удалить пользователя из таблицы отписавшихся"""
-    conn = await get_conn()
-    try:
-        await conn.execute("DELETE FROM unsubscribed_users WHERE telegram_id = $1", user_id)
-        return True
-    except Exception as e:
-        print(f"❌ Ошибка удаления из отписавшихся: {e}")
-        return False
-    finally:
-        await release_conn(conn)
-
-
-async def count_unsubscribed():
-    """Количество отписавшихся"""
-    conn = await get_conn()
-    try:
-        return await conn.fetchval("SELECT COUNT(*) FROM unsubscribed_users")
-    finally:
-        await release_conn(conn)
-
-async def has_user_seen_premium_offer(user_id: int) -> bool:
-    """Проверить, видел ли пользователь предложение Премиум"""
-    conn = await get_conn()
-    try:
-        row = await conn.fetchrow(
-            "SELECT has_seen_premium_offer FROM users WHERE telegram_id = $1",
-            user_id
-        )
-        return row['has_seen_premium_offer'] if row else False
-    finally:
-        await release_conn(conn)
-
-
-async def mark_premium_offer_as_seen(user_id: int):
-    """Отметить, что пользователь видел предложение Премиум"""
-    conn = await get_conn()
-    try:
-        await conn.execute(
-            "UPDATE users SET has_seen_premium_offer = TRUE WHERE telegram_id = $1",
-            user_id
-        )
     finally:
         await release_conn(conn)
