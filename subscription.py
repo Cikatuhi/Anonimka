@@ -53,7 +53,8 @@ class SubscriptionManager:
                 user_id=user_id_int,
                 plan="HIGH",
                 status="inactive",
-                end_date=None
+                end_date=None,
+                card_token=card_token
             )
             logger.info(f"Created new subscription for user {user_id}")
             return await self.get_user_subscription(user_id)
@@ -126,6 +127,10 @@ class SubscriptionManager:
         is_successful = payload.get("Status") == "Completed"
         amount = int(payload.get("Amount", 0) * 100)
         is_recurrent = payload.get("IsRecurrent", False)
+        card_token = payload.get("CardToken")
+        
+        if card_token:
+            await database.save_card_token(int(user_id), card_token)
         
         if not is_recurrent:
             logger.info(f"User {user_id}: Initial payment processed")
