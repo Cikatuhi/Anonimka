@@ -536,7 +536,12 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_id = query.from_user.id
+    user = query.from_user
+    user_id = user.id
+    username = user.username or "без_юзернейма"
+    first_name = user.first_name or "Пользователь"
+
+    await database.register_user(user_id, username, first_name)
     
     subscription = await database.get_subscription_by_user_id(user_id)
     is_active = False
@@ -577,8 +582,9 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    payment_token = await database.generate_payment_token(user_id)
-    payment_link = f"http://201.51.11.220:8001/pay/{payment_token}"
+    token = await database.generate_payment_token(user_id)
+    payment_link = f"http://201.51.11.220:8001/pay/{token}"
+    
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
     )
@@ -595,14 +601,18 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def buy_premium_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик нажатия на кнопку 'Получить Премиум' после чекбоксов"""
     query = update.callback_query
     await query.answer()
     
-    user_id = query.from_user.id
+    user = query.from_user
+    user_id = user.id
+    username = user.username or "без_юзернейма"
+    first_name = user.first_name or "Пользователь"
     
-    payment_token = await database.generate_payment_token(user_id)
-    payment_link = f"http://201.51.11.220:8001/pay/{payment_token}"
+    await database.register_user(user_id, username, first_name)
+    
+    token = await database.generate_payment_token(user_id)
+    payment_link = f"http://201.51.11.220:8001/pay/{token}"
     
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
@@ -622,7 +632,6 @@ async def buy_premium_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def show_sender(query, user_id):
-    """Показать отправителя (реального или рандомного)"""
     callback_data = query.data
     sender_id = None
     
@@ -706,6 +715,7 @@ async def show_sender(query, user_id):
         parse_mode="HTML"
     )
 
+
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🌟 ℹ️ <b>Информация</b> 🌟\n\n"
@@ -723,8 +733,8 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+
 async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отписаться от подписки (удалить премиум)"""
     user = update.effective_user
     user_id = user.id
     username = user.username or ''
@@ -764,7 +774,6 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def confirm_unsubscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Подтверждение отписки — удаляем премиум"""
     query = update.callback_query
     await query.answer()
     
@@ -780,7 +789,7 @@ async def confirm_unsubscribe_handler(update: Update, context: ContextTypes.DEFA
             parse_mode="HTML"
         )
         return
-    )
+    
     success = await database.unsubscribe_user(user_id, username, first_name, 'manual')
     
     if success:
@@ -799,7 +808,6 @@ async def confirm_unsubscribe_handler(update: Update, context: ContextTypes.DEFA
 
 
 async def cancel_unsubscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отмена отписки"""
     query = update.callback_query
     await query.answer()
     
@@ -826,9 +834,9 @@ def main():
     app.add_handler(CallbackQueryHandler(send_again_handler, pattern="send_again_"))
     app.add_handler(CallbackQueryHandler(reply_anon_handler, pattern="reply_"))
     app.add_handler(CallbackQueryHandler(who_is_it_handler, pattern="who_is_it"))
+    app.add_handler(CallbackQueryHandler(buy_premium_handler, pattern="buy_premium"))
     app.add_handler(CallbackQueryHandler(confirm_unsubscribe_handler, pattern="confirm_unsubscribe"))
     app.add_handler(CallbackQueryHandler(cancel_unsubscribe_handler, pattern="cancel_unsubscribe"))
-    app.add_handler(CallbackQueryHandler(buy_premium_handler, pattern="buy_premium"))
 
     print("🤖 Бот запущен и готов к приёму анонимных сообщений...")
     app.run_polling()
