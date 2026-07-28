@@ -140,7 +140,6 @@ class SubscriptionManager:
             return await self._handle_successful_payment(subscription, amount, user_id)
         else:
             return await self._handle_failed_payment(subscription, amount, user_id)
-    
     async def _handle_successful_payment(self, subscription: dict, amount: int, user_id: str) -> Dict:
         if amount == config.SUBSCRIPTION_PLANS["HIGH"][0]:
             days = self.plan_days["HIGH"]
@@ -172,13 +171,29 @@ class SubscriptionManager:
             plan=next_plan
         )
         
-        subscription_id = subscription.get('subscription_id')
-        if subscription_id:
-            await self.client.update_subscription(
-                subscription_id=subscription_id,
+
+        card_token = subscription.get('card_token')
+        
+        if card_token:
+
+            result = await self.client.create_subscription(
+                token=card_token,
+                account_id=user_id,
                 amount=next_amount,
+                interval_days=config.BILLING_INTERVAL_DAYS,
                 max_periods=1
             )
+            
+            if result["success"]:
+                await database.save_cloudpayments_subscription_id(
+                    user_id=int(user_id),
+                    subscription_id=result["subscription_id"]
+                )
+                logger.info(f"User {user_id}: New subscription created with card token")
+            else:
+                logger.error(f"User {user_id}: Failed to create subscription with card token: {result.get('error')}")
+        else:
+            logger.warning(f"User {user_id}: No card token found for subscription")
         
         logger.info(f"User {user_id}: ✅ {plan_name} paid successfully. Access for {days} days until {end_date}")
         
