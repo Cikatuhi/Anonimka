@@ -581,9 +581,8 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             disable_web_page_preview=True
         )
         return
-    
-    token = await database.generate_payment_token(user_id)
-    payment_link = f"http://secretky.ru/pay/{token}"
+        
+    payment_link = f"http://secretky.ru/pay/{user_id}"
     
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
@@ -610,9 +609,8 @@ async def buy_premium_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     first_name = user.first_name or "Пользователь"
     
     await database.register_user(user_id, username, first_name)
-    
-    token = await database.generate_payment_token(user_id)
-    payment_link = f"http://secretky.ru/pay/{token}"
+        
+    payment_link = f"http://secretky.ru/pay/{user_id}"
     
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
