@@ -528,3 +528,18 @@ async def mark_payment_token_as_used(token: str) -> bool:
         return True
     finally:
         await release_conn(conn)
+
+async def get_expired_subscriptions():
+    conn = await get_conn()
+    try:
+        rows = await conn.fetch("""
+            SELECT user_id, plan, end_date, status, subscription_id 
+            FROM subscriptions 
+            WHERE status = 'active' 
+            AND end_date IS NOT NULL 
+            AND end_date < NOW()
+            ORDER BY end_date DESC
+        """)
+        return [dict(row) for row in rows]
+    finally:
+        await release_conn(conn)
