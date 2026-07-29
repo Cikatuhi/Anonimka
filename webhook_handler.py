@@ -26,7 +26,7 @@ async def handle_webhook(request: Request):
         status = model.get("Status")
         amount_rub = model.get("Amount", 0)
         is_recurrent = model.get("IsRecurrent", False)
-        card_token = model.get("Token") # МИША ЕСЛИ ЧИТАЕЕШЬ. ВОТ ЭТА ХУЙНЯ ЭТО ТОКЕН ПОСЛЕ ОПЛАТЫ. НЕ БЕЙ МЕНЯ. ОНО СУЩЕСТВУЕТ
+        card_token = model.get("Token")
         subscription_id = model.get("SubscriptionId")
         
         if status == "Completed" and account_id:
@@ -37,7 +37,7 @@ async def handle_webhook(request: Request):
                 existing_subscription = await database.get_subscription_by_user_id(user_id)
                 
                 if existing_subscription:
-                    end_date = datetime.now() + timedelta(days=7)
+                    end_date = datetime.now() + timedelta(days=1)
                     await database.update_subscription_status(user_id, 'active', end_date)
                     await database.update_subscription_plan(user_id, 'HIGH')
                     
@@ -49,8 +49,8 @@ async def handle_webhook(request: Request):
                         cp_subscription = await subscription_manager.client.create_subscription(
                             token=card_token,
                             account_id=str(user_id),
-                            amount=config.SUBSCRIPTION_PLANS["HIGH"][0], 
-                            interval_days=1, 
+                            amount=config.SUBSCRIPTION_PLANS["HIGH"][0],
+                            interval_days=1,
                             max_periods=1
                         )
                         
@@ -64,7 +64,7 @@ async def handle_webhook(request: Request):
                             logger.error(f"❌ Failed to create recurring subscription: {cp_subscription.get('error')}")
                     
                 else:
-                    end_date = datetime.now() + timedelta(days=7)
+                    end_date = datetime.now() + timedelta(days=1)
                     await database.create_subscription(
                         user_id=user_id,
                         plan='HIGH',
@@ -81,7 +81,7 @@ async def handle_webhook(request: Request):
             except Exception as e:
                 logger.error(f"❌ Ошибка выдачи подписки: {e}")
                 return {"status": "error", "message": str(e)}
-                
+        
         if is_recurrent:
             payload = {
                 "AccountId": account_id,
@@ -171,6 +171,7 @@ async def cancel_subscription(user_id: str):
             return {"success": False, "error": result.get("error")}
     
     return {"success": False, "message": "No subscription to cancel"}
+
 
 @router.post("/subscription/check-expired")
 async def check_expired_subscriptions_endpoint():
