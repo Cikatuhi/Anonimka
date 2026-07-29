@@ -564,9 +564,9 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text = (
             "💌 <b>Узнайте кто отправил это послание - приобретите пробный Премиум за 5₽ на 1 день</b> 👇\n\n"
-            "✅ Нажимая кнопку, вы принимаете условия <a href='http://201.51.11.220:8001/doc2'>лицензионного соглашения</a>.\n\n"
+            "✅ Нажимая кнопку, вы принимаете условия <a href='http://secretky.ru/doc2'>лицензионного соглашения</a>.\n\n"
             "✅ Нажимая кнопку, вы принимаете условия продления. Дальнейший тариф: 299₽ каждые 1 день по истечению пробного периода. Отключить можно в любой момент.\n\n"
-            "✅ Нажимая кнопку, вы даете согласие на обработку данных и подтверждаете ознакомление с <a href='http://201.51.11.220:8001/doc1'>политикой конфиденциальности</a>."
+            "✅ Нажимая кнопку, вы даете согласие на обработку данных и подтверждаете ознакомление с <a href='http://secretky.ru/doc1'>политикой конфиденциальности</a>."
         )
         
         keyboard = [
@@ -583,7 +583,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     token = await database.generate_payment_token(user_id)
-    payment_link = f"http://201.51.11.220:8001/pay/{token}"
+    payment_link = f"http://secretky.ru/pay/{token}"
     
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
@@ -612,7 +612,7 @@ async def buy_premium_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     await database.register_user(user_id, username, first_name)
     
     token = await database.generate_payment_token(user_id)
-    payment_link = f"http://201.51.11.220:8001/pay/{token}"
+    payment_link = f"http://secretky.ru/pay/{token}"
     
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
@@ -723,9 +723,9 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Если у вас возник вопрос, предложение или просто есть желание что-то обсудить, напишите нам – @youzabota\n"
         f"⏰ <i>Время работы: с 10:00 до 19:00 (МСК)</i>\n\n"
         f"📚 <b>Документация</b>\n"
-        f"├─ <a href='http://201.51.11.220:8001/doc1'>Политика конфиденциальности</a>\n"
-        f"├─ <a href='http://201.51.11.220:8001/doc2'>Условия использования</a>\n"
-        f"└─ <a href='http://201.51.11.220:8001/doc3'>Тарификация</a>\n\n"
+        f"├─ <a href='http://secretky.ru/doc1'>Политика конфиденциальности</a>\n"
+        f"├─ <a href='http://secretky.ru/doc2'>Условия использования</a>\n"
+        f"└─ <a href='http://secretky.ru/doc3'>Тарификация</a>\n\n"
         f"📛 <b>Контактная информация</b>\n" 
         f"└─ ИП Докучаева Оксана Анатольевна\n"
         f" ├─ ИНН: 631936284733\n"
