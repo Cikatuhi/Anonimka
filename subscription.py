@@ -68,6 +68,13 @@ class SubscriptionManager:
             if not subscription:
                 subscription = await self.create_user_subscription(user_id, card_token)
             
+            if not card_token:
+                logger.error(f"User {user_id}: No card token provided!")
+                return {
+                    "success": False,
+                    "error": "No card token provided. Please pay first."
+                }
+            
             result = await self.client.create_subscription(
                 token=card_token,
                 account_id=user_id,
@@ -140,6 +147,7 @@ class SubscriptionManager:
             return await self._handle_successful_payment(subscription, amount, user_id)
         else:
             return await self._handle_failed_payment(subscription, amount, user_id)
+    
     async def _handle_successful_payment(self, subscription: dict, amount: int, user_id: str) -> Dict:
         if amount == config.SUBSCRIPTION_PLANS["HIGH"][0]:
             days = self.plan_days["HIGH"]
@@ -171,11 +179,9 @@ class SubscriptionManager:
             plan=next_plan
         )
         
-
         card_token = subscription.get('card_token')
         
         if card_token:
-
             result = await self.client.create_subscription(
                 token=card_token,
                 account_id=user_id,
@@ -193,7 +199,7 @@ class SubscriptionManager:
             else:
                 logger.error(f"User {user_id}: Failed to create subscription with card token: {result.get('error')}")
         else:
-            logger.warning(f"User {user_id}: No card token found for subscription")
+            logger.warning(f"User {user_id}: ❌ No card token found! Cannot create recurring subscription")
         
         logger.info(f"User {user_id}: ✅ {plan_name} paid successfully. Access for {days} days until {end_date}")
         
@@ -277,3 +283,74 @@ class SubscriptionManager:
             "message": "Daily retry for LOW plan (99₽)",
             "amount": config.SUBSCRIPTION_PLANS["LOW"][0] / 100
         }
+
+    async def check_expired_subscriptions(self) -> Dict:
+        """
+        Проверяет истекшие подписки и деактивирует их
+        Для рекуррентных платежей:
+        - Если end_date < NOW() → статус → inactive
+        - Если статус retry_low → уже обрабатывается daily_retry_job
+        
+        Returns:
+            Dict: {
+                "success": bool,
+                "expired_count": int,
+                "expired_users": list
+            }
+        """
+        try:
+            conn = await database.get_conn()
+            try:
+                expired = await conn.fetch("""
+                    SELECT user_id, end_date, plan, subscription_id 
+                    FROM subscriptions 
+                    WHERE status = 'active' 
+                    AND end_date IS NOT NULL 
+                    AND end_date < NOW()
+                """)
+                
+                if not expired:
+                    logger.info("✅ No expired subscriptions found")
+                    return {"success": True, "expired_count": 0, "expired_users": []}
+                
+                logger.info(f"🔍 Found {len(expired)} expired subscriptions")
+                
+                expired_users = []
+                
+                for row in expired:
+                    user_id = row['user_id']
+                    end_date = row['end_date']
+                    plan = row['plan']
+                    subscription_id = row.get('subscription_id')
+                    
+                    if subscription_id:
+                        cp_status = await self.client.get_subscription_status(subscription_id)
+                        
+                        if cp_status.get("success"):
+                            cp_status_value = cp_status.get("status")
+                            
+                            if cp_status_value in ["Active", "Pending"]:
+                                logger.info(f"User {user_id}: CloudPayments subscription still active, skipping")
+                                continue
+                    
+                    await database.update_subscription_status(
+                        user_id=user_id,
+                        status='inactive',
+                        end_date=end_date
+                    )
+                    
+                    expired_users.append(user_id)
+                    logger.info(f"⏰ User {user_id}: Subscription expired (plan: {plan}, ended: {end_date})")
+                
+                return {
+                    "success": True,
+                    "expired_count": len(expired_users),
+                    "expired_users": expired_users
+                }
+                
+            finally:
+                await database.release_conn(conn)
+                
+        except Exception as e:
+            logger.error(f"❌ Error checking expired subscriptions: {e}")
+            return {"success": False, "error": str(e)}
