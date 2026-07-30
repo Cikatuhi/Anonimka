@@ -535,12 +535,12 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
+    
     user = query.from_user
     user_id = user.id
     username = user.username or "без_юзернейма"
     first_name = user.first_name or "Пользователь"
-
+    
     await database.register_user(user_id, username, first_name)
     
     subscription = await database.get_subscription_by_user_id(user_id)
@@ -553,10 +553,21 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif status == 'active' and end_date is None:
             is_active = True
     
-    if is_active:
-        await show_sender(query, user_id)
+    callback_data = query.data
+    sender_id = None
+    if callback_data.startswith("who_is_it_"):
+        try:
+            sender_id = int(callback_data.split("_")[2])
+        except (IndexError, ValueError):
+            sender_id = None
+    
+    if is_active and sender_id:
+        await show_sender_as_new_message(query, sender_id)
+        
+        await query.answer("🔓 Отправитель раскрыт!")
         return
     
+
     has_seen = await database.has_user_seen_premium_offer(user_id)
     
     if not has_seen:
@@ -574,29 +585,37 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await query.edit_message_text(
+        await query.message.reply_text(
             text=text,
             reply_markup=reply_markup,
             parse_mode="HTML",
             disable_web_page_preview=True
         )
-        return
         
+        await query.answer("💳 Нажмите на кнопку для оплаты")
+        return
+    
     payment_link = f"http://secretky.ru/pay/{user_id}"
     
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
+        f"Ссылка действительна постоянно. Вы можете вернуться к ней в любое время.\n\n"
+        f"👇 Нажмите на кнопку ниже, чтобы оплатить."
     )
+    
     keyboard = [
         [InlineKeyboardButton("👀 Узнать отправителя", url=payment_link)]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    # Отправляем НОВОЕ сообщение
+    await query.message.reply_text(
         text=text,
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
+    
+    await query.answer("🔗 Ссылка на оплату отправлена!")
 
 
 async def buy_premium_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
