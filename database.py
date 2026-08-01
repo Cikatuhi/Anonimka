@@ -15,36 +15,33 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 pool = None
-USE_POOL = os.getenv("USE_POOL", "false").lower() == "true"
+
+async def get_conn():
+    """Всегда создаёт НОВОЕ соединение (просто и надёжно)"""
+    return await asyncpg.connect(DATABASE_URL)
+
+async def release_conn(conn):
+    """Всегда закрывает соединение"""
+    if conn:
+        await conn.close()
 
 async def init_pool():
+    """Инициализация пула (опционально, но оставим для совместимости)"""
     global pool
     if pool is None:
         pool = await asyncpg.create_pool(
             DATABASE_URL,
-            min_size=5,
-            max_size=20,
+            min_size=2,
+            max_size=10,
             max_inactive_connection_lifetime=300,
-            command_timeout=10,
+            command_timeout=30,
             timeout=30
         )
         print("✅ Пул соединений с БД создан")
     return pool
 
-async def get_conn():
-    global pool
-    if USE_POOL:
-        if pool is None:
-            await init_pool()
-        return await pool.acquire()
-    else:
-        return await asyncpg.connect(DATABASE_URL)
-
-async def release_conn(conn):
-    if USE_POOL and pool:
-        await pool.release(conn)
-    else:
-        await conn.close()
+# ===== ВСЕ ОСТАЛЬНЫЕ ФУНКЦИИ ОСТАЮТСЯ БЕЗ ИЗМЕНЕНИЙ =====
+# (они используют get_conn() и release_conn())
 
 async def init_db():
     conn = await get_conn()
