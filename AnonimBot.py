@@ -556,7 +556,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     print(f"🔍 sender_id: {sender_id}")
     
-    # ===== ПРОВЕРКА ПОДПИСКИ ЧЕРЕЗ ПРЯМОЙ SQL =====
+    # ===== ПРОВЕРКА ПОДПИСКИ =====
     conn = await database.get_conn()
     try:
         row = await conn.fetchrow(
@@ -579,10 +579,27 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         print(f"❌ Подписка НЕ найдена для {user_id}")
     
-    # ===== ЕСЛИ ПОДПИСКА АКТИВНА И ЕСТЬ SENDER_ID =====
-    if is_active and sender_id:
-        await show_sender_as_new_message(query, sender_id)
-        await query.answer("🔓 Отправитель раскрыт!")
+    # ===== ЕСЛИ ПОДПИСКА АКТИВНА =====
+    if is_active:
+        # Если есть sender_id — показываем его
+        if sender_id and sender_id != 0:
+            await show_sender_as_new_message(query, sender_id)
+            await query.answer("🔓 Отправитель раскрыт!")
+        else:
+            # Если это рассылка — показываем РАНДОМНОГО пользователя
+            all_users = await database.get_all_users(limit=1000)
+            available_users = [u for u in all_users if u != user_id]
+            
+            if available_users:
+                random_user_id = random.choice(available_users)
+                await show_sender_as_new_message(query, random_user_id)
+                await query.answer("🔓 Показан случайный пользователь (рассылка)")
+            else:
+                await query.message.reply_text(
+                    "😅 В базе пока нет других пользователей.",
+                    parse_mode="HTML"
+                )
+                await query.answer("❌ Нет пользователей")
         return
     
     # ===== ЕСЛИ ПОДПИСКА НЕ АКТИВНА — ПОКАЗЫВАЕМ ОПЛАТУ =====
@@ -592,6 +609,9 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await database.mark_premium_offer_as_seen(user_id)
         text = (
             "💌 <b>Узнайте кто отправил это послание - приобретите пробный Премиум за 5₽ на 1 день</b> 👇\n\n"
+            "✅ Нажимая кнопку, вы принимаете условия <a href='https://secretky.ru/doc2'>лицензионного соглашения</a>.\n\n"
+            "✅ Нажимая кнопку, вы принимаете условия продления. Дальнейший тариф: 299₽ каждые 1 день по истечению пробного периода. Отключить можно в любой момент.\n\n"
+            "✅ Нажимая кнопку, вы даете согласие на обработку данных и подтверждаете ознакомление с <a href='https://secretky.ru/doc1'>политикой конфиденциальности</a>."
         )
         keyboard = [
             [InlineKeyboardButton("💳 Получить Премиум", callback_data="buy_premium")]
