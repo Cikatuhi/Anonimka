@@ -93,7 +93,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             reply_keyboard = [
                 [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
-                [InlineKeyboardButton("👀 Узнать кто это", callback_data=f"who_is_it_{user_id}")]
+                [InlineKeyboardButton("👀 Узнать кто это", callback_data=f"who_is_it_{original_sender_id}")]
             ]
             reply_markup = InlineKeyboardMarkup(reply_keyboard)
     
