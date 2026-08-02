@@ -543,27 +543,36 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await database.register_user(user_id, username, first_name)
     
-    # ===== ПРОВЕРКА ПОДПИСКИ (ИСПРАВЛЕНО!) =====
+    # ===== ЖЁСТКАЯ ПРОВЕРКА ПОДПИСКИ =====
+    # 1. Получаем подписку из БД
     subscription = await database.get_subscription_by_user_id(user_id)
-    print(f"🔍 Подписка для {user_id}: {subscription}")  # Отладка
+    print(f"🔍 subscription: {subscription}")
     
+    # 2. Проверяем через прямой SQL (в обход функций database)
+    conn = await database.get_conn()
+    try:
+        row = await conn.fetchrow(
+            "SELECT status, end_date FROM subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+            user_id
+        )
+        print(f"🔍 SQL row: {row}")
+    finally:
+        await database.release_conn(conn)
+    
+    # 3. Определяем, активна ли подписка (через прямой SQL)
     is_active = False
-    if subscription:
-        status = subscription.get('status')
-        end_date = subscription.get('end_date')
-        
-        # Если статус активен и дата окончания не истекла
-        if status == 'active':
-            if end_date is None or end_date > datetime.now():
-                is_active = True
-                print(f"✅ Подписка активна для {user_id}, истекает: {end_date}")
-            else:
-                print(f"⚠️ Подписка истекла для {user_id}, end_date: {end_date}")
+    if row:
+        status = row['status']
+        end_date = row['end_date']
+        if status == 'active' and (end_date is None or end_date > datetime.now()):
+            is_active = True
+            print(f"✅ Подписка АКТИВНА через SQL!")
         else:
-            print(f"⚠️ Статус подписки для {user_id}: {status}")
+            print(f"⚠️ Подписка НЕ активна: status={status}, end_date={end_date}")
     else:
-        print(f"❌ Подписка не найдена для {user_id}")
+        print(f"❌ Подписка НЕ найдена в БД")
     
+    # ===== ОСТАЛЬНОЙ КОД =====
     callback_data = query.data
     sender_id = None
     if callback_data.startswith("who_is_it_"):
@@ -572,54 +581,43 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except (IndexError, ValueError):
             sender_id = None
     
-    # ===== ЕСЛИ ПОДПИСКА АКТИВНА =====
     if is_active and sender_id:
         await show_sender_as_new_message(query, sender_id)
         await query.answer("🔓 Отправитель раскрыт!")
         return
     
-    # ===== ЕСЛИ НЕТ ПОДПИСКИ =====
+    # Если подписка не активна — показываем оплату
     has_seen = await database.has_user_seen_premium_offer(user_id)
     
     if not has_seen:
         await database.mark_premium_offer_as_seen(user_id)
-        
         text = (
-            "💌 <b>Узнайте кто отправил это послание - всего за за 5₽!</b> 👇\n\n"
+            "💌 <b>Узнайте кто отправил это послание - приобретите пробный Премиум за 5₽ на 1 день</b> 👇\n\n"
         )
-        
         keyboard = [
             [InlineKeyboardButton("💳 Получить Премиум", callback_data="buy_premium")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
         await query.message.reply_text(
             text=text,
             reply_markup=reply_markup,
             parse_mode="HTML",
             disable_web_page_preview=True
         )
-        
         await query.answer("💳 Нажмите на кнопку для оплаты")
         return
     
     payment_link = f"https://secretky.ru/pay/{user_id}"
-    
-    text = (
-        f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
-    )
-    
+    text = "<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>"
     keyboard = [
         [InlineKeyboardButton("👀 Узнать отправителя", url=payment_link)]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
     await query.message.reply_text(
         text=text,
         reply_markup=reply_markup,
         parse_mode="HTML"
     )
-    
     await query.answer("🔗 Ссылка на оплату отправлена!")
 
 async def show_sender_as_new_message(query, sender_id):
