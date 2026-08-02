@@ -6,10 +6,10 @@ import asyncio
 
 load_dotenv()
 
-DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_HOST = os.getenv("DB_HOST", "45.10.43.48")
 DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME", "anonim_bot")
-DB_USER = os.getenv("DB_USER", "bot_user")
+DB_NAME = os.getenv("DB_NAME", "default_db")
+DB_USER = os.getenv("DB_USER", "gen_user")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
