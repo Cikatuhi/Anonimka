@@ -5,7 +5,7 @@ import random
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler, AIORateLimiter
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 import database
 
 load_dotenv()
@@ -543,12 +543,20 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await database.register_user(user_id, username, first_name)
     
-    # ===== ЖЁСТКАЯ ПРОВЕРКА ПОДПИСКИ =====
-    # 1. Получаем подписку из БД
-    subscription = await database.get_subscription_by_user_id(user_id)
-    print(f"🔍 subscription: {subscription}")
+    # ===== ПОЛУЧАЕМ SENDER_ID ИЗ CALLBACK =====
+    callback_data = query.data
+    sender_id = None
+    if callback_data.startswith("who_is_it_"):
+        parts = callback_data.split("_")
+        if len(parts) >= 3:
+            try:
+                sender_id = int(parts[2])
+            except ValueError:
+                sender_id = None
     
-    # 2. Проверяем через прямой SQL (в обход функций database)
+    print(f"🔍 sender_id: {sender_id}")
+    
+    # ===== ПРОВЕРКА ПОДПИСКИ ЧЕРЕЗ ПРЯМОЙ SQL =====
     conn = await database.get_conn()
     try:
         row = await conn.fetchrow(
@@ -559,34 +567,25 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         await database.release_conn(conn)
     
-    # 3. Определяем, активна ли подписка (через прямой SQL)
     is_active = False
     if row:
         status = row['status']
         end_date = row['end_date']
         if status == 'active' and (end_date is None or end_date > datetime.now()):
             is_active = True
-            print(f"✅ Подписка АКТИВНА через SQL!")
+            print(f"✅ Подписка АКТИВНА для {user_id}!")
         else:
             print(f"⚠️ Подписка НЕ активна: status={status}, end_date={end_date}")
     else:
-        print(f"❌ Подписка НЕ найдена в БД")
+        print(f"❌ Подписка НЕ найдена для {user_id}")
     
-    # ===== ОСТАЛЬНОЙ КОД =====
-    callback_data = query.data
-    sender_id = None
-    if callback_data.startswith("who_is_it_"):
-        try:
-            sender_id = int(callback_data.split("_")[2])
-        except (IndexError, ValueError):
-            sender_id = None
-    
+    # ===== ЕСЛИ ПОДПИСКА АКТИВНА И ЕСТЬ SENDER_ID =====
     if is_active and sender_id:
         await show_sender_as_new_message(query, sender_id)
         await query.answer("🔓 Отправитель раскрыт!")
         return
     
-    # Если подписка не активна — показываем оплату
+    # ===== ЕСЛИ ПОДПИСКА НЕ АКТИВНА — ПОКАЗЫВАЕМ ОПЛАТУ =====
     has_seen = await database.has_user_seen_premium_offer(user_id)
     
     if not has_seen:
@@ -619,6 +618,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
     await query.answer("🔗 Ссылка на оплату отправлена!")
+
 
 async def show_sender_as_new_message(query, sender_id):
     """Показывает отправителя в НОВОМ сообщении"""
@@ -669,7 +669,7 @@ async def buy_premium_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     await database.register_user(user_id, username, first_name)
         
-    payment_link = f"http://secretky.ru/pay/{user_id}"
+    payment_link = f"https://secretky.ru/pay/{user_id}"
     
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
@@ -780,9 +780,9 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Если у вас возник вопрос, предложение или просто есть желание что-то обсудить, напишите нам – @youzabota\n"
         f"⏰ <i>Время работы: с 10:00 до 19:00 (МСК)</i>\n\n"
         f"📚 <b>Документация</b>\n"
-        f"├─ <a href='http://secretky.ru/doc1'>Политика конфиденциальности</a>\n"
-        f"├─ <a href='http://secretky.ru/doc2'>Условия использования</a>\n"
-        f"└─ <a href='http://secretky.ru/doc3'>Тарификация</a>\n\n"
+        f"├─ <a href='https://secretky.ru/doc1'>Политика конфиденциальности</a>\n"
+        f"├─ <a href='https://secretky.ru/doc2'>Условия использования</a>\n"
+        f"└─ <a href='https://secretky.ru/doc3'>Тарификация</a>\n\n"
         f"📛 <b>Контактная информация</b>\n" 
         f"└─ ИП Докучаева Оксана Анатольевна\n"
         f" ├─ ИНН: 631936284733\n"
