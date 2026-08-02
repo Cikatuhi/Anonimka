@@ -543,15 +543,26 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await database.register_user(user_id, username, first_name)
     
+    # ===== ПРОВЕРКА ПОДПИСКИ (ИСПРАВЛЕНО!) =====
     subscription = await database.get_subscription_by_user_id(user_id)
+    print(f"🔍 Подписка для {user_id}: {subscription}")  # Отладка
+    
     is_active = False
     if subscription:
         status = subscription.get('status')
         end_date = subscription.get('end_date')
-        if status == 'active' and end_date and end_date > datetime.now():
-            is_active = True
-        elif status == 'active' and end_date is None:
-            is_active = True
+        
+        # Если статус активен и дата окончания не истекла
+        if status == 'active':
+            if end_date is None or end_date > datetime.now():
+                is_active = True
+                print(f"✅ Подписка активна для {user_id}, истекает: {end_date}")
+            else:
+                print(f"⚠️ Подписка истекла для {user_id}, end_date: {end_date}")
+        else:
+            print(f"⚠️ Статус подписки для {user_id}: {status}")
+    else:
+        print(f"❌ Подписка не найдена для {user_id}")
     
     callback_data = query.data
     sender_id = None
@@ -561,23 +572,20 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except (IndexError, ValueError):
             sender_id = None
     
+    # ===== ЕСЛИ ПОДПИСКА АКТИВНА =====
     if is_active and sender_id:
         await show_sender_as_new_message(query, sender_id)
-        
         await query.answer("🔓 Отправитель раскрыт!")
         return
     
-
+    # ===== ЕСЛИ НЕТ ПОДПИСКИ =====
     has_seen = await database.has_user_seen_premium_offer(user_id)
     
     if not has_seen:
         await database.mark_premium_offer_as_seen(user_id)
         
         text = (
-            "💌 <b>Узнайте кто отправил это послание - приобретите пробный Премиум за 5₽ на 1 день</b> 👇\n\n"
-            "✅ Нажимая кнопку, вы принимаете условия <a href='http://secretky.ru/doc2'>лицензионного соглашения</a>.\n\n"
-            "✅ Нажимая кнопку, вы принимаете условия продления. Дальнейший тариф: 299₽ каждые 1 день по истечению пробного периода. Отключить можно в любой момент.\n\n"
-            "✅ Нажимая кнопку, вы даете согласие на обработку данных и подтверждаете ознакомление с <a href='http://secretky.ru/doc1'>политикой конфиденциальности</a>."
+            "💌 <b>Узнайте кто отправил это послание - всего за за 5₽!</b> 👇\n\n"
         )
         
         keyboard = [
@@ -595,7 +603,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("💳 Нажмите на кнопку для оплаты")
         return
     
-    payment_link = f"http://secretky.ru/pay/{user_id}"
+    payment_link = f"https://secretky.ru/pay/{user_id}"
     
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
@@ -606,7 +614,6 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Отправляем НОВОЕ сообщение
     await query.message.reply_text(
         text=text,
         reply_markup=reply_markup,
@@ -614,6 +621,43 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     await query.answer("🔗 Ссылка на оплату отправлена!")
+
+async def show_sender_as_new_message(query, sender_id):
+    """Показывает отправителя в НОВОМ сообщении"""
+    sender_data = await database.get_user(sender_id)
+    
+    if sender_data:
+        username = sender_data.get('username', 'без_юзернейма')
+        first_name = sender_data.get('first_name', 'Пользователь')
+        
+        text = (
+            f"🤫 <b>Пользователь рассекречен. Им оказался – {first_name}</b>\n\n"
+            f"<b>Логин пользователя:</b> @{username}\n"
+            f"<b>Его идентификатор в Telegram:</b> <code>{sender_id}</code>\n\n"
+        )
+        
+        keyboard = None
+        if username and username != 'без_юзернейма':
+            keyboard = [
+                [InlineKeyboardButton("👤 Перейти в профиль", url=f"https://t.me/{username}")]
+            ]
+        else:
+            keyboard = [
+                [InlineKeyboardButton("👤 Перейти в профиль", url=f"tg://user?id={sender_id}")]
+            ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+        
+        await query.message.reply_text(
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+    else:
+        await query.message.reply_text(
+            text="😅 Произошла ошибка. Попробуйте позже.",
+            parse_mode="HTML"
+        )
 
 
 async def buy_premium_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
