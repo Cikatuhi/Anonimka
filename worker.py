@@ -19,17 +19,25 @@ async def get_job_status(job_id: int) -> str:
     finally:
         await database.release_conn(conn)
 
+async def update_job_status(job_id, status, **kwargs):
+    conn = await database.get_conn()
+    try:
+        fields = []
+        values = []
+        for key, val in kwargs.items():
+            fields.append(f"{key} = ${len(values)+1}")
+            values.append(val)
+        values.append(job_id)
+        query = f"UPDATE broadcast_jobs SET {', '.join(fields)} WHERE id = ${len(values)}"
+        await conn.execute(query, *values)
+    finally:
+        await database.release_conn(conn)
+
 async def process_job(job):
     job_id = job['id']
-    user_ids = json.loads(job['user_ids_json'])
-    message = job['message']
     
     await update_job_status(job_id, 'running', started_at=datetime.now())
     
-    total = len(user_ids)
-    results = {'sent': 0, 'failed': 0, 'blocked': 0}
-    
-    job_id = job['id']
     user_ids = json.loads(job['user_ids_json'])
     message = job['message']
     
@@ -43,8 +51,6 @@ async def process_job(job):
         ]
     }
     message_text = f"✉️ Вам пришло анонимное сообщение:\n\n{message}"
-    
-    await update_job_status(job_id, 'running', started_at=datetime.now())
     
     async with httpx.AsyncClient(timeout=30.0) as client:
         for i, user_id in enumerate(user_ids):
@@ -61,7 +67,7 @@ async def process_job(job):
                     )
                     return
                 elif current_status == 'cancelled':
-                    print(f"⛔ Задача {job_id} отменена. Остановка на {i} сообщении...")
+                    print(f"⛔ Задача {job_id} отменена. Остановка...")
                     await update_job_status(
                         job_id, 'cancelled',
                         sent_users=results['sent'],
@@ -135,33 +141,18 @@ async def process_job(job):
     )
     print(f"✅ Задача {job_id} завершена")
 
-async def update_job_status(job_id, status, **kwargs):
-    conn = await database.get_conn()
-    try:
-        fields = []
-        values = []
-        for key, val in kwargs.items():
-            fields.append(f"{key} = ${len(values)+1}")
-            values.append(val)
-        values.append(job_id)
-        query = f"UPDATE broadcast_jobs SET {', '.join(fields)} WHERE id = ${len(values)}"
-        await conn.execute(query, *values)
-    finally:
-        await database.release_conn(conn)
-
 async def main_loop():
     print("🚀 Воркер запущен, ждём задачи...")
     while True:
         try:
             conn = await database.get_conn()
+            
             job = await conn.fetchrow(
-                "SELECT * FROM broadcast_jobs WHERE status IN ('pending', 'paused') ORDER BY created_at LIMIT 1"
+                "SELECT * FROM broadcast_jobs WHERE status = 'pending' ORDER BY created_at LIMIT 1"
             )
             await database.release_conn(conn)
             
             if job:
-                if job['status'] == 'paused':
-                    print(f"▶️ Возобновляем задачу {job['id']} из паузы...")
                 print(f"📨 Найдена задача {job['id']}, начинаем обработку...")
                 await process_job(job)
             else:
