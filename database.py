@@ -397,8 +397,12 @@ async def unsubscribe_user(user_id: int, username: str = None, first_name: str =
             if user_data:
                 username = user_data.get('username', '')
                 first_name = user_data.get('first_name', '')
+
+        await conn.execute(
+            "UPDATE subscriptions SET status = 'cancelled' WHERE user_id = $1",
+            user_id
+        )
         
-        await conn.execute("DELETE FROM subscriptions WHERE user_id = $1", user_id)
         await conn.execute("""
             INSERT INTO unsubscribed_users (telegram_id, username, first_name, reason, unsubscribed_at)
             VALUES ($1, $2, $3, $4, NOW())
@@ -408,6 +412,7 @@ async def unsubscribe_user(user_id: int, username: str = None, first_name: str =
                 reason = $4, 
                 unsubscribed_at = NOW()
         """, user_id, username or '', first_name or '', reason)
+        
         return True
     except Exception as e:
         print(f"❌ Ошибка отписки: {e}")
