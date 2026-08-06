@@ -458,20 +458,21 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user = query.from_user
     user_id = user.id
     chat_id = update.effective_chat.id
+    original_message = query.message
     
     subgram_result = await database.check_subgram(user_id, chat_id)
     
     if subgram_result.get("status") == "warning":
-        await query.edit_message_text(
+        await context.bot.send_message(
+            chat_id=chat_id,
             text="📢 <b>Для ответа на это сообщение необходимо подписаться на каналы!</b>\n\n"
                  "Пожалуйста, подпишитесь на предложенные каналы, затем нажмите кнопку еще раз.",
             parse_mode="HTML"
         )
-        await query.answer("❌ Требуется подписка на каналы")
+        await query.answer("❌ Требуется подписка на каналы", show_alert=True)
         return
     
     data = query.data
-    original_message = query.message
     
     if user_id in reply_sessions:
         if 'question_message_id' in context.user_data:
@@ -505,18 +506,20 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data['original_chat_id'] = original_message.chat_id
     context.user_data['original_reply_markup'] = original_message.reply_markup
 
+    keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     if data == "reply_anon":
         reply_sessions[user_id] = ADMIN_ID
-        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        msg = await query.edit_message_text(
-            text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
-                 f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
+        msg = await context.bot.send_message(
+            chat_id=chat_id,
+            text="<b>✍️ Напишите ваш ответ</b>\n\n"
+                 "Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
         context.user_data['question_message_id'] = msg.message_id
+        await query.answer("✅ Ответ будет отправлен анонимно")
         return
 
     if data.startswith("reply_"):
@@ -525,25 +528,20 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             try:
                 original_sender_id = int(parts[1])
                 reply_sessions[user_id] = original_sender_id
-
-                keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                msg = await query.edit_message_text(
-                    text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
-                         f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
+                msg = await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="<b>✍️ Напишите ваш ответ</b>\n\n"
+                         "Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
                     reply_markup=reply_markup,
                     parse_mode="HTML"
                 )
                 context.user_data['question_message_id'] = msg.message_id
+                await query.answer("✅ Ответ будет отправлен анонимно")
                 return
             except ValueError:
                 pass
 
-    await query.edit_message_text(
-        text="❌ Не удалось обработать запрос.",
-        parse_mode="HTML"
-    )
+    await query.answer("❌ Не удалось обработать запрос.")
 
 async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -556,7 +554,6 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await database.register_user(user_id, username, first_name)
     
-    # ===== ПОЛУЧАЕМ SENDER_ID ИЗ CALLBACK =====
     callback_data = query.data
     sender_id = None
     if callback_data.startswith("who_is_it_"):
@@ -569,7 +566,6 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     print(f"🔍 sender_id: {sender_id}")
     
-    # ===== ПРОВЕРКА ПОДПИСКИ =====
     conn = await database.get_conn()
     try:
         row = await conn.fetchrow(
@@ -592,14 +588,11 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         print(f"❌ Подписка НЕ найдена для {user_id}")
     
-    # ===== ЕСЛИ ПОДПИСКА АКТИВНА =====
     if is_active:
-        # Если есть sender_id — показываем его
         if sender_id and sender_id != 0:
             await show_sender_as_new_message(query, sender_id)
             await query.answer("🔓 Отправитель раскрыт!")
         else:
-            # Если это рассылка — показываем РАНДОМНОГО пользователя
             all_users = await database.get_all_users(limit=1000)
             available_users = [u for u in all_users if u != user_id]
             
@@ -615,7 +608,6 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer("❌ Нет пользователей")
         return
     
-    # ===== ЕСЛИ ПОДПИСКА НЕ АКТИВНА — ПОКАЗЫВАЕМ ОПЛАТУ =====
     has_seen = await database.has_user_seen_premium_offer(user_id)
     
     if not has_seen:
@@ -651,7 +643,6 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_sender_as_new_message(query, sender_id):
-    """Показывает отправителя в НОВОМ сообщении"""
     sender_data = await database.get_user(sender_id)
     
     if sender_data:
