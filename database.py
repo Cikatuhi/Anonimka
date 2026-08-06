@@ -3,6 +3,7 @@ import os
 import secrets
 from dotenv import load_dotenv
 import asyncio
+import aiohttp
 
 load_dotenv()
 
@@ -14,6 +15,7 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
+SUBGRAM_API_KEY = os.getenv("SUBGRAM_API_KEY", "")
 # ============================================
 # ПРОСТЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С БД (без пула)
 # ============================================
@@ -512,3 +514,39 @@ async def get_expired_subscriptions():
 async def init_pool():
     """Пустая функция для совместимости"""
     pass
+
+async def check_subgram(user_id: int, chat_id: int) -> dict:
+    """
+    Проверяет подписку пользователя через SubGram.
+    Возвращает:
+        - status: 'ok' — можно пропустить
+        - status: 'warning' — нужна подписка
+        - status: 'error' — ошибка, пропустить
+    """
+    if not SUBGRAM_API_KEY:
+        print("⚠️ SUBGRAM_API_KEY не настроен. Пропускаем проверку.")
+        return {"status": "ok", "message": "SubGram не настроен"}
+    
+    url = "https://api.subgram.org/get-sponsors"
+    headers = {
+        "Auth": SUBGRAM_API_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "user_id": user_id,
+        "chat_id": chat_id
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    print(f"🔍 SubGram ответ для {user_id}: {data}")
+                    return data
+                else:
+                    print(f"❌ SubGram ошибка: {response.status}")
+                    return {"status": "error", "message": f"HTTP {response.status}"}
+    except Exception as e:
+        print(f"❌ SubGram исключение: {e}")
+        return {"status": "error", "message": str(e)}
