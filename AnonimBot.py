@@ -454,11 +454,25 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
+    
+    user = query.from_user
+    user_id = user.id
+    chat_id = update.effective_chat.id
+    
+    subgram_result = await database.check_subgram(user_id, chat_id)
+    
+    if subgram_result.get("status") == "warning":
+        await query.edit_message_text(
+            text="📢 <b>Для ответа на это сообщение необходимо подписаться на каналы!</b>\n\n"
+                 "Пожалуйста, подпишитесь на предложенные каналы, затем нажмите кнопку еще раз.",
+            parse_mode="HTML"
+        )
+        await query.answer("❌ Требуется подписка на каналы")
+        return
+    
     data = query.data
-    user_id = query.from_user.id
     original_message = query.message
-
+    
     if user_id in reply_sessions:
         if 'question_message_id' in context.user_data:
             try:
@@ -530,7 +544,6 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         text="❌ Не удалось обработать запрос.",
         parse_mode="HTML"
     )
-
 
 async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
