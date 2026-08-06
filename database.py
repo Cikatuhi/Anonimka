@@ -398,20 +398,26 @@ async def unsubscribe_user(user_id: int, username: str = None, first_name: str =
                 username = user_data.get('username', '')
                 first_name = user_data.get('first_name', '')
 
+        sub = await get_subscription_by_user_id(user_id)
+        card_token = sub.get('card_token') if sub else None
+        subscription_id = sub.get('subscription_id') if sub else None
+
         await conn.execute(
             "UPDATE subscriptions SET status = 'cancelled' WHERE user_id = $1",
             user_id
         )
         
         await conn.execute("""
-            INSERT INTO unsubscribed_users (telegram_id, username, first_name, reason, unsubscribed_at)
-            VALUES ($1, $2, $3, $4, NOW())
+            INSERT INTO unsubscribed_users (telegram_id, username, first_name, reason, unsubscribed_at, card_token, subscription_id)
+            VALUES ($1, $2, $3, $4, NOW(), $5, $6)
             ON CONFLICT (telegram_id) DO UPDATE SET 
                 username = $2, 
                 first_name = $3, 
                 reason = $4, 
-                unsubscribed_at = NOW()
-        """, user_id, username or '', first_name or '', reason)
+                unsubscribed_at = NOW(),
+                card_token = $5,
+                subscription_id = $6
+        """, user_id, username or '', first_name or '', reason, card_token, subscription_id)
         
         return True
     except Exception as e:
@@ -419,7 +425,6 @@ async def unsubscribe_user(user_id: int, username: str = None, first_name: str =
         return False
     finally:
         await release_conn(conn)
-
 async def is_user_unsubscribed(user_id: int) -> bool:
     conn = await get_conn()
     try:
