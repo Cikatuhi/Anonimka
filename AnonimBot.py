@@ -454,26 +454,22 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
-    user = query.from_user
-    user_id = user.id
+
+    data = query.data
+    user_id = query.from_user.id
     chat_id = update.effective_chat.id
     original_message = query.message
-    
+
+    # ===== 1. ПРОВЕРКА SUBGRAM =====
     subgram_result = await database.check_subgram(user_id, chat_id)
-    
+
     if subgram_result.get("status") == "warning":
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="📢 <b>Для ответа на это сообщение необходимо подписаться на каналы!</b>\n\n"
-                 "Пожалуйста, подпишитесь на предложенные каналы, затем нажмите кнопку еще раз.",
-            parse_mode="HTML"
-        )
+        # SubGram САМ показывает блок с подпиской
+        # НЕ отправляем своё сообщение, чтобы не было дубляжа
         await query.answer("❌ Требуется подписка на каналы", show_alert=True)
         return
-    
-    data = query.data
-    
+
+    # ===== 2. СТАНДАРТНАЯ ЛОГИКА ОТВЕТА =====
     if user_id in reply_sessions:
         if 'question_message_id' in context.user_data:
             try:
@@ -506,20 +502,18 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data['original_chat_id'] = original_message.chat_id
     context.user_data['original_reply_markup'] = original_message.reply_markup
 
-    keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     if data == "reply_anon":
         reply_sessions[user_id] = ADMIN_ID
-        msg = await context.bot.send_message(
-            chat_id=chat_id,
-            text="<b>✍️ Напишите ваш ответ</b>\n\n"
-                 "Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
+        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        msg = await query.edit_message_text(
+            text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
+                 f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
             reply_markup=reply_markup,
             parse_mode="HTML"
         )
         context.user_data['question_message_id'] = msg.message_id
-        await query.answer("✅ Ответ будет отправлен анонимно")
         return
 
     if data.startswith("reply_"):
@@ -528,20 +522,25 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             try:
                 original_sender_id = int(parts[1])
                 reply_sessions[user_id] = original_sender_id
-                msg = await context.bot.send_message(
-                    chat_id=chat_id,
-                    text="<b>✍️ Напишите ваш ответ</b>\n\n"
-                         "Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
+
+                keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                msg = await query.edit_message_text(
+                    text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
+                         f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
                     reply_markup=reply_markup,
                     parse_mode="HTML"
                 )
                 context.user_data['question_message_id'] = msg.message_id
-                await query.answer("✅ Ответ будет отправлен анонимно")
                 return
             except ValueError:
                 pass
 
-    await query.answer("❌ Не удалось обработать запрос.")
+    await query.edit_message_text(
+        text="❌ Не удалось обработать запрос.",
+        parse_mode="HTML"
+    )
 
 async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
