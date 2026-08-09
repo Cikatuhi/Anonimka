@@ -43,7 +43,7 @@ async def handle_webhook(request: Request):
                     
                     if card_token:
                         await database.save_card_token(user_id, card_token)
-                        logger.info(f"✅ Card token saved for user {user_id}: {card_token[:10]}...")
+                        logger.info(f"✅ Card token saved for user {user_id}")
                     
                     if card_token:
                         cp_subscription = await subscription_manager.client.create_subscription(
@@ -73,7 +73,7 @@ async def handle_webhook(request: Request):
                         card_token=card_token,
                         subscription_id=subscription_id
                     )
-                    logger.info(f"✅ Создана подписка для пользователя {user_id} с Card Token")
+                    logger.info(f"✅ Создана подписка для пользователя {user_id}")
                 
                 await database.remove_from_unsubscribed(user_id)
                 return {"status": "ok", "message": "Subscription activated"}
@@ -107,7 +107,6 @@ async def handle_webhook(request: Request):
         logger.error(f"Error processing webhook: {e}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
-
 @router.post("/subscription/init")
 async def initialize_subscription(request: Request):
     try:
@@ -125,12 +124,10 @@ async def initialize_subscription(request: Request):
         logger.error(f"Error initializing subscription: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.post("/subscription/daily-retry/{user_id}")
-async def trigger_daily_retry(user_id: str):
-    result = await subscription_manager.handle_daily_low_retry(user_id)
+@router.post("/subscription/process-expired")
+async def process_expired_subscription_endpoint():
+    result = await subscription_manager.check_expired_subscriptions()
     return result
-
 
 @router.get("/subscription/{user_id}")
 async def get_subscription_status(user_id: str):
@@ -153,7 +150,6 @@ async def get_subscription_status(user_id: str):
         "created_at": subscription.get('created_at').isoformat() if subscription.get('created_at') else None
     }
 
-
 @router.post("/subscription/cancel/{user_id}")
 async def cancel_subscription(user_id: str):
     subscription = await subscription_manager.get_user_subscription(user_id)
@@ -172,30 +168,7 @@ async def cancel_subscription(user_id: str):
     
     return {"success": False, "message": "No subscription to cancel"}
 
-
 @router.post("/subscription/check-expired")
-async def check_expired_subscriptions_endpoint():
+async def check_expired_subscriptions():
     result = await subscription_manager.check_expired_subscriptions()
     return result
-
-
-@router.get("/subscription/expired")
-async def get_expired_subscriptions():
-    conn = await database.get_conn()
-    try:
-        rows = await conn.fetch("""
-            SELECT user_id, plan, end_date, status, subscription_id 
-            FROM subscriptions 
-            WHERE status = 'active' 
-            AND end_date IS NOT NULL 
-            AND end_date < NOW()
-            ORDER BY end_date DESC
-            LIMIT 100
-        """)
-        return {
-            "success": True,
-            "count": len(rows),
-            "expired": [dict(row) for row in rows]
-        }
-    finally:
-        await database.release_conn(conn)
