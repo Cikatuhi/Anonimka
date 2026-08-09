@@ -79,7 +79,7 @@ class SubscriptionManager:
                 token=card_token,
                 account_id=user_id,
                 amount=config.SUBSCRIPTION_PLANS["HIGH"][0],
-                interval_days=config.BILLING_INTERVAL_DAYS,
+                interval_days=1,
                 max_periods=1
             )
             
@@ -119,6 +119,55 @@ class SubscriptionManager:
         except Exception as e:
             logger.error(f"Error in handle_initial_payment: {e}")
             return {"success": False, "error": str(e)}
+    
+    async def process_expired_subscription(self, user_id: int) -> Dict:
+        subscription = await self.get_user_subscription(str(user_id))
+        if not subscription:
+            return {"success": False, "error": "Subscription not found"}
+        
+        card_token = subscription.get('card_token')
+        if not card_token:
+            logger.error(f"User {user_id}: No card token found!")
+            return {"success": False, "error": "No card token found"}
+        
+        logger.info(f"🔄 Processing expired subscription for user {user_id}")
+        
+        result = await self.client.charge_card(card_token, str(user_id), 69900)
+        
+        if result["success"]:
+            await self._extend_subscription(user_id, 7, "HIGH")
+            logger.info(f"✅ User {user_id}: Charged 699₽, extended for 7 days")
+            return {"success": True, "plan": "HIGH", "days": 7}
+        
+        logger.warning(f"⚠️ User {user_id}: HIGH (699₽) failed, trying MEDIUM...")
+        
+        result = await self.client.charge_card(card_token, str(user_id), 29900)
+        
+        if result["success"]:
+            await self._extend_subscription(user_id, 3, "MEDIUM")
+            logger.info(f"✅ User {user_id}: Charged 299₽, extended for 3 days")
+            return {"success": True, "plan": "MEDIUM", "days": 3}
+        
+        logger.warning(f"⚠️ User {user_id}: MEDIUM (299₽) failed, trying LOW...")
+        
+        result = await self.client.charge_card(card_token, str(user_id), 9900)
+        
+        if result["success"]:
+            await self._extend_subscription(user_id, 1, "LOW")
+            logger.info(f"✅ User {user_id}: Charged 99₽, extended for 1 day")
+            return {"success": True, "plan": "LOW", "days": 1}
+        
+        logger.warning(f"⚠️ User {user_id}: LOW (99₽) failed, status → retry_low")
+        
+        await database.update_subscription_status(user_id, "retry_low")
+        return {"success": False, "status": "retry_low"}
+    
+    async def _extend_subscription(self, user_id: int, days: int, plan: str):
+
+        end_date = datetime.utcnow() + timedelta(days=days)
+        await database.update_subscription_status(user_id, 'active', end_date)
+        await database.update_subscription_plan(user_id, plan)
+        logger.info(f"✅ User {user_id}: Subscription extended to {end_date} (plan: {plan})")
     
     async def handle_payment_webhook(self, payload: dict) -> Dict:
         user_id = payload.get("AccountId")
@@ -178,28 +227,6 @@ class SubscriptionManager:
             user_id=int(user_id),
             plan=next_plan
         )
-        
-        card_token = subscription.get('card_token')
-        
-        if card_token:
-            result = await self.client.create_subscription(
-                token=card_token,
-                account_id=user_id,
-                amount=next_amount,
-                interval_days=config.BILLING_INTERVAL_DAYS,
-                max_periods=1
-            )
-            
-            if result["success"]:
-                await database.save_cloudpayments_subscription_id(
-                    user_id=int(user_id),
-                    subscription_id=result["subscription_id"]
-                )
-                logger.info(f"User {user_id}: New subscription created with card token")
-            else:
-                logger.error(f"User {user_id}: Failed to create subscription with card token: {result.get('error')}")
-        else:
-            logger.warning(f"User {user_id}: ❌ No card token found! Cannot create recurring subscription")
         
         logger.info(f"User {user_id}: ✅ {plan_name} paid successfully. Access for {days} days until {end_date}")
         
@@ -283,69 +310,38 @@ class SubscriptionManager:
             "message": "Daily retry for LOW plan (99₽)",
             "amount": config.SUBSCRIPTION_PLANS["LOW"][0] / 100
         }
-
+    
     async def check_expired_subscriptions(self) -> Dict:
         """
-        Проверяет истекшие подписки и деактивирует их
-        Для рекуррентных платежей:
-        - Если end_date < NOW() → статус → inactive
-        - Если статус retry_low → уже обрабатывается daily_retry_job
-        
-        Returns:
-            Dict: {
-                "success": bool,
-                "expired_count": int,
-                "expired_users": list
-            }
+        Проверяет истекшие подписки и запускает процесс списания
         """
         try:
             conn = await database.get_conn()
             try:
                 expired = await conn.fetch("""
-                    SELECT user_id, end_date, plan, subscription_id 
+                    SELECT user_id, card_token, subscription_id 
                     FROM subscriptions 
                     WHERE status = 'active' 
                     AND end_date IS NOT NULL 
                     AND end_date < NOW()
+                    AND card_token IS NOT NULL
                 """)
                 
                 if not expired:
-                    logger.info("✅ No expired subscriptions found")
-                    return {"success": True, "expired_count": 0, "expired_users": []}
+                    return {"success": True, "expired_count": 0}
                 
                 logger.info(f"🔍 Found {len(expired)} expired subscriptions")
                 
-                expired_users = []
-                
+                results = []
                 for row in expired:
                     user_id = row['user_id']
-                    end_date = row['end_date']
-                    plan = row['plan']
-                    subscription_id = row.get('subscription_id')
-                    
-                    if subscription_id:
-                        cp_status = await self.client.get_subscription_status(subscription_id)
-                        
-                        if cp_status.get("success"):
-                            cp_status_value = cp_status.get("status")
-                            
-                            if cp_status_value in ["Active", "Pending"]:
-                                logger.info(f"User {user_id}: CloudPayments subscription still active, skipping")
-                                continue
-                    
-                    await database.update_subscription_status(
-                        user_id=user_id,
-                        status='inactive',
-                        end_date=end_date
-                    )
-                    
-                    expired_users.append(user_id)
-                    logger.info(f"⏰ User {user_id}: Subscription expired (plan: {plan}, ended: {end_date})")
+                    result = await self.process_expired_subscription(user_id)
+                    results.append({"user_id": user_id, "result": result})
                 
                 return {
                     "success": True,
-                    "expired_count": len(expired_users),
-                    "expired_users": expired_users
+                    "expired_count": len(expired),
+                    "results": results
                 }
                 
             finally:
