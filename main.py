@@ -10,6 +10,8 @@ from webhook_handler import router
 from subscription import SubscriptionManager
 from config import config
 
+logging.getLogger('apscheduler').setLevel(logging.INFO)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
