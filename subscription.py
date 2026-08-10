@@ -87,6 +87,7 @@ class SubscriptionManager:
                 user_id=int(user_id),
                 plan="HIGH"
             )
+            await self._clear_retry_at(user_id)
             
             logger.info(f"User {user_id}: Initial payment successful, subscription active until {end_date}")
             
@@ -100,6 +101,27 @@ class SubscriptionManager:
         except Exception as e:
             logger.error(f"Error in handle_initial_payment: {e}")
             return {"success": False, "error": str(e)}
+
+    async def _set_next_retry_at(self, user_id: int, when: datetime):
+        conn = await database.get_conn()
+        try:
+            await conn.execute(
+                "UPDATE subscriptions SET next_retry_at = $1 WHERE user_id = $2",
+                when,
+                user_id
+            )
+        finally:
+            await database.release_conn(conn)
+
+    async def _clear_retry_at(self, user_id: int):
+        conn = await database.get_conn()
+        try:
+            await conn.execute(
+                "UPDATE subscriptions SET next_retry_at = NULL WHERE user_id = $1",
+                int(user_id)
+            )
+        finally:
+            await database.release_conn(conn)
     
     async def process_expired_subscription(self, user_id: int) -> Dict:
         subscription = await self.get_user_subscription(str(user_id))
@@ -111,6 +133,30 @@ class SubscriptionManager:
             logger.error(f"User {user_id}: No card token found!")
             return {"success": False, "error": "No card token found"}
         
+        status = subscription.get('status')
+        logger.info(f"🔄 Processing subscription for user {user_id} (status={status})")
+
+        # retry_low means: only retry the 99₽ charge once every 24 hours.
+        if status == "retry_low":
+            result = await self.client.charge_card(card_token, str(user_id), 9900)
+
+            if result["success"]:
+                await self._extend_subscription(user_id, 1, "LOW")
+                logger.info(f"✅ User {user_id}: Retry LOW 99₽ succeeded, extended for 1 day")
+                return {"success": True, "plan": "LOW", "days": 1, "retry": True}
+
+            next_retry_at = datetime.utcnow() + timedelta(days=1)
+            await self._set_next_retry_at(user_id, next_retry_at)
+            logger.warning(
+                f"⚠️ User {user_id}: Retry LOW 99₽ failed; next attempt at {next_retry_at}"
+            )
+            return {
+                "success": False,
+                "status": "retry_low",
+                "next_retry_at": next_retry_at.isoformat()
+            }
+        
+        # Normal expired active subscription: keep the existing fallback chain.
         logger.info(f"🔄 Processing expired subscription for user {user_id}")
         
         result = await self.client.charge_card(card_token, str(user_id), 69900)
@@ -138,15 +184,24 @@ class SubscriptionManager:
             logger.info(f"✅ User {user_id}: Charged 99₽, extended for 1 day")
             return {"success": True, "plan": "LOW", "days": 1}
         
-        logger.warning(f"⚠️ User {user_id}: LOW (99₽) failed, status → retry_low")
-        
+        next_retry_at = datetime.utcnow() + timedelta(days=1)
         await database.update_subscription_status(user_id, "retry_low")
-        return {"success": False, "status": "retry_low"}
+        await self._set_next_retry_at(user_id, next_retry_at)
+        logger.warning(
+            f"⚠️ User {user_id}: LOW (99₽) failed, status → retry_low; "
+            f"next attempt at {next_retry_at}"
+        )
+        return {
+            "success": False,
+            "status": "retry_low",
+            "next_retry_at": next_retry_at.isoformat()
+        }
     
     async def _extend_subscription(self, user_id: int, days: int, plan: str):
         end_date = datetime.utcnow() + timedelta(days=days)
         await database.update_subscription_status(user_id, 'active', end_date)
         await database.update_subscription_plan(user_id, plan)
+        await self._clear_retry_at(user_id)
         logger.info(f"✅ User {user_id}: Subscription extended to {end_date} (plan: {plan})")
     
     async def handle_payment_webhook(self, payload: dict) -> Dict:
@@ -208,6 +263,7 @@ class SubscriptionManager:
             user_id=int(user_id),
             plan=next_plan
         )
+        await self._clear_retry_at(user_id)
         
         logger.info(f"User {user_id}: ✅ {plan_name} paid successfully. Access for {days} days until {end_date}")
         
@@ -233,15 +289,21 @@ class SubscriptionManager:
             next_amount = config.SUBSCRIPTION_PLANS["LOW"][0]
             next_plan = "LOW"
         elif current_amount == config.SUBSCRIPTION_PLANS["LOW"][0]:
+            next_retry_at = datetime.utcnow() + timedelta(days=1)
             await database.update_subscription_status(
                 user_id=int(user_id),
                 status="retry_low"
             )
-            logger.info(f"User {user_id}: All plans failed. Will retry LOW (99₽) daily forever")
+            await self._set_next_retry_at(int(user_id), next_retry_at)
+            logger.info(
+                f"User {user_id}: All plans failed. Will retry LOW (99₽) daily; "
+                f"next attempt at {next_retry_at}"
+            )
             return {
                 "success": False,
-                "message": "All plans failed. Will retry LOW plan (99₽) daily forever",
-                "status": "retry_low_daily_forever"
+                "message": "All plans failed. Will retry LOW plan (99₽) daily",
+                "status": "retry_low",
+                "next_retry_at": next_retry_at.isoformat()
             }
         else:
             return {"success": False, "error": f"Unknown amount: {current_amount}"}
@@ -269,6 +331,7 @@ class SubscriptionManager:
         }
     
     async def handle_daily_low_retry(self, user_id: str) -> Dict:
+        """Оставлено для совместимости; реальные списания выполняет планировщик."""
         subscription = await self.get_user_subscription(user_id)
         if not subscription:
             return {"success": False, "error": "User not found"}
@@ -276,11 +339,9 @@ class SubscriptionManager:
         if subscription.get('status') != 'retry_low':
             return {"success": False, "message": "User is not in retry low state"}
         
-        logger.info(f"User {user_id}: Daily retry for LOW plan (99₽) - active system")
-        
         return {
             "success": True,
-            "message": "Daily retry for LOW plan (99₽)",
+            "message": "Daily retry is handled by the main expiration scheduler",
             "amount": config.SUBSCRIPTION_PLANS["LOW"][0] / 100
         }
     
@@ -289,18 +350,29 @@ class SubscriptionManager:
             conn = await database.get_conn()
             try:
                 expired = await conn.fetch("""
-                    SELECT user_id, card_token, subscription_id 
-                    FROM subscriptions 
-                    WHERE status = 'active' 
-                    AND end_date IS NOT NULL 
-                    AND end_date < NOW()
-                    AND card_token IS NOT NULL
+                    SELECT user_id, card_token, subscription_id, status, end_date, next_retry_at
+                    FROM subscriptions
+                    WHERE card_token IS NOT NULL
+                      AND (
+                          (
+                              status = 'active'
+                              AND end_date IS NOT NULL
+                              AND end_date < NOW()
+                          )
+                          OR
+                          (
+                              status = 'retry_low'
+                              AND next_retry_at IS NOT NULL
+                              AND next_retry_at <= NOW()
+                          )
+                      )
+                    ORDER BY COALESCE(next_retry_at, end_date) ASC
                 """)
                 
                 if not expired:
                     return {"success": True, "expired_count": 0}
                 
-                logger.info(f"🔍 Found {len(expired)} expired subscriptions")
+                logger.info(f"🔍 Found {len(expired)} subscriptions ready for charging")
                 
                 results = []
                 for row in expired:
