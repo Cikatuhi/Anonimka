@@ -75,47 +75,28 @@ class SubscriptionManager:
                     "error": "No card token provided. Please pay first."
                 }
             
-            result = await self.client.create_subscription(
-                token=card_token,
-                account_id=user_id,
-                amount=config.SUBSCRIPTION_PLANS["HIGH"][0],
-                interval_days=1,
-                max_periods=1
+            logger.info(f"ℹ️ User {user_id}: Active system — no CloudPayments subscription created")
+            
+            end_date = datetime.utcnow() + timedelta(days=1)
+            await database.update_subscription_status(
+                user_id=int(user_id),
+                status="active",
+                end_date=end_date
+            )
+            await database.update_subscription_plan(
+                user_id=int(user_id),
+                plan="HIGH"
             )
             
-            if result["success"]:
-                await database.save_cloudpayments_subscription_id(
-                    user_id=int(user_id),
-                    subscription_id=result["subscription_id"]
-                )
-                
-                end_date = datetime.utcnow() + timedelta(days=1)
-                await database.update_subscription_status(
-                    user_id=int(user_id),
-                    status="active",
-                    end_date=end_date
-                )
-                await database.update_subscription_plan(
-                    user_id=int(user_id),
-                    plan="HIGH"
-                )
-                
-                logger.info(f"User {user_id}: Initial payment successful, subscription active until {end_date}")
-                
-                return {
-                    "success": True,
-                    "message": "Subscription activated for 1 day",
-                    "subscription_id": result["subscription_id"],
-                    "access_until": end_date.isoformat(),
-                    "next_amount": config.SUBSCRIPTION_PLANS["HIGH"][0] / 100,
-                    "next_plan": "HIGH"
-                }
-            else:
-                logger.error(f"User {user_id}: Failed to create subscription: {result.get('error')}")
-                return {
-                    "success": False,
-                    "error": result.get("error", "Failed to create subscription")
-                }
+            logger.info(f"User {user_id}: Initial payment successful, subscription active until {end_date}")
+            
+            return {
+                "success": True,
+                "message": "Subscription activated for 1 day",
+                "access_until": end_date.isoformat(),
+                "next_amount": config.SUBSCRIPTION_PLANS["HIGH"][0] / 100,
+                "next_plan": "HIGH"
+            }
         except Exception as e:
             logger.error(f"Error in handle_initial_payment: {e}")
             return {"success": False, "error": str(e)}
@@ -163,13 +144,13 @@ class SubscriptionManager:
         return {"success": False, "status": "retry_low"}
     
     async def _extend_subscription(self, user_id: int, days: int, plan: str):
-
         end_date = datetime.utcnow() + timedelta(days=days)
         await database.update_subscription_status(user_id, 'active', end_date)
         await database.update_subscription_plan(user_id, plan)
         logger.info(f"✅ User {user_id}: Subscription extended to {end_date} (plan: {plan})")
     
     async def handle_payment_webhook(self, payload: dict) -> Dict:
+        """Обработка вебхуков для обратной совместимости"""
         user_id = payload.get("AccountId")
         if not user_id:
             logger.error("No AccountId in webhook")
@@ -295,15 +276,7 @@ class SubscriptionManager:
         if subscription.get('status') != 'retry_low':
             return {"success": False, "message": "User is not in retry low state"}
         
-        subscription_id = subscription.get('subscription_id')
-        if subscription_id:
-            await self.client.update_subscription(
-                subscription_id=subscription_id,
-                amount=config.SUBSCRIPTION_PLANS["LOW"][0],
-                max_periods=None
-            )
-        
-        logger.info(f"User {user_id}: Daily retry for LOW plan (99₽) - infinite attempts")
+        logger.info(f"User {user_id}: Daily retry for LOW plan (99₽) - active system")
         
         return {
             "success": True,
@@ -312,9 +285,6 @@ class SubscriptionManager:
         }
     
     async def check_expired_subscriptions(self) -> Dict:
-        """
-        Проверяет истекшие подписки и запускает процесс списания
-        """
         try:
             conn = await database.get_conn()
             try:
