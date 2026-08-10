@@ -21,7 +21,7 @@ class CloudPaymentsClient:
         payload = {
             "Token": token,
             "AccountId": account_id,
-            "Amount": amount / 100,  # В рублях
+            "Amount": amount / 100,
             "Currency": "RUB",
             "InvoiceId": f"sub_{account_id}_{int(datetime.utcnow().timestamp())}",
             "Description": f"Subscription payment for user {account_id}",
@@ -37,41 +37,58 @@ class CloudPaymentsClient:
                         "Content-Type": "application/json"
                     }
                 )
-                
+
+            logger.info(
+                "CloudPayments charge response: HTTP %s, body=%s",
+                response.status_code,
+                response.text
+            )
+            
             if response.status_code == 200:
                 data = response.json()
+                logger.info(
+                    "CloudPayments charge parsed response: Success=%s, Message=%s, Model=%s",
+                    data.get("Success"),
+                    data.get("Message"),
+                    data.get("Model")
+                )
                 if data.get("Success"):
                     return {
-                        "success": True, 
+                        "success": True,
                         "data": data.get("Model", {}),
                         "message": "Payment initiated, waiting for webhook confirmation"
                     }
                 else:
                     return {
-                        "success": False, 
+                        "success": False,
                         "error": data.get("Message", "Unknown error"),
                         "data": data.get("Model", {})
                     }
             else:
+                logger.error(
+                    "CloudPayments charge HTTP error: status=%s, body=%s",
+                    response.status_code,
+                    response.text
+                )
                 return {
-                    "success": False, 
+                    "success": False,
                     "error": f"HTTP {response.status_code}: {response.text}"
                 }
         except Exception as e:
             logger.error(f"Error charging card: {e}")
             return {"success": False, "error": str(e)}
     
-    async def create_subscription(self, 
-                                  token: str, 
-                                  account_id: str, 
+    async def create_subscription(self,
+                                  token: str,
+                                  account_id: str,
                                   amount: int,
                                   interval_days: int = 1,
                                   max_periods: Optional[int] = None) -> Dict[str, Any]:
         logger.warning("create_subscription() вызван, но активная система отключена")
         return {"success": False, "error": "Internal subscriptions are disabled"}
     
-    async def update_subscription(self, 
-                                  subscription_id: str, 
+    async def update_subscription(self,
+                                  subscription_id: str,
                                   amount: Optional[int] = None,
                                   max_periods: Optional[int] = None,
                                   status: Optional[str] = None,
