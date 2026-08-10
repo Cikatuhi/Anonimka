@@ -71,6 +71,9 @@ async def daily_retry_job():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    print("🔥🔥🔥 LIFESPAN IS RUNNING")
+    logger.info("🚀 LIFESPAN STARTED")
+
     scheduler.add_job(
         process_expired_subscriptions_job,
         trigger=IntervalTrigger(minutes=5),
