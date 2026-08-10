@@ -45,7 +45,7 @@ async def handle_webhook(request: Request):
                         await database.save_card_token(user_id, card_token)
                         logger.info(f"✅ Card token saved for user {user_id}")
                     
-    logger.info(f"ℹ️ CloudPayments subscription not created (active system)")
+                    logger.info(f"ℹ️ User {user_id}: No CloudPayments subscription created (active system)")
                     
                 else:
                     end_date = datetime.now() + timedelta(days=1)
@@ -55,7 +55,7 @@ async def handle_webhook(request: Request):
                         status='active',
                         end_date=end_date,
                         card_token=card_token,
-                        subscription_id=subscription_id
+                        subscription_id=None
                     )
                     logger.info(f"✅ Создана подписка для пользователя {user_id}")
                 
