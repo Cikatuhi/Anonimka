@@ -45,23 +45,7 @@ async def handle_webhook(request: Request):
                         await database.save_card_token(user_id, card_token)
                         logger.info(f"✅ Card token saved for user {user_id}")
                     
-                    if card_token:
-                        cp_subscription = await subscription_manager.client.create_subscription(
-                            token=card_token,
-                            account_id=str(user_id),
-                            amount=config.SUBSCRIPTION_PLANS["HIGH"][0],
-                            interval_days=1,
-                            max_periods=1
-                        )
-                        
-                        if cp_subscription["success"]:
-                            await database.save_cloudpayments_subscription_id(
-                                user_id=user_id,
-                                subscription_id=cp_subscription["subscription_id"]
-                            )
-                            logger.info(f"✅ Recurring subscription created for user {user_id}")
-                        else:
-                            logger.error(f"❌ Failed to create recurring subscription: {cp_subscription.get('error')}")
+    logger.info(f"ℹ️ CloudPayments subscription not created (active system)")
                     
                 else:
                     end_date = datetime.now() + timedelta(days=1)
