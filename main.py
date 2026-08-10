@@ -10,8 +10,6 @@ from webhook_handler import router
 from subscription import SubscriptionManager
 from config import config
 
-logging.getLogger('apscheduler').setLevel(logging.INFO)
-
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -22,7 +20,6 @@ subscription_manager = SubscriptionManager()
 scheduler = AsyncIOScheduler()
 
 async def process_expired_subscriptions_job():
-
     logger.info("🔄 Checking for expired subscriptions...")
     result = await subscription_manager.check_expired_subscriptions()
     
@@ -38,7 +35,6 @@ async def process_expired_subscriptions_job():
         logger.error(f"❌ Error: {result.get('error')}")
 
 async def retry_low_job():
-
     logger.info("🔄 Processing retry_low users...")
     
     users = await subscription_manager.get_all_users_in_retry_low()
@@ -75,11 +71,6 @@ async def daily_retry_job():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-
-    print("🔥🔥🔥 LIFESPAN IS RUNNING 🔥🔥🔥")
-    logger.info("🚀 LIFESPAN STARTED")
-    
-    
     scheduler.add_job(
         process_expired_subscriptions_job,
         trigger=IntervalTrigger(minutes=5),
