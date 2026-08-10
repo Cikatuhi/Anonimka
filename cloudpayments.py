@@ -15,39 +15,52 @@ class CloudPaymentsClient:
         self.api_secret = config.API_SECRET
         self.auth = base64.b64encode(f"{self.public_id}:{self.api_secret}".encode()).decode()
     
-    async def charge_card(self, token: str, account_id: str, amount: int) -> Dict[str, Any]:
-        url = f"{self.base_url}/payments/cards/charge"
-        
-        payload = {
-            "Token": token,
-            "AccountId": account_id,
-            "Amount": amount / 100,  # В рублях
-            "Currency": "RUB",
-            "Description": f"Subscription payment for user {account_id}",
-        }
-        
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    url,
-                    json=payload,
-                    headers={
-                        "Authorization": f"Basic {self.auth}",
-                        "Content-Type": "application/json"
-                    }
-                )
-                
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("Success"):
-                    return {"success": True, "data": data["Model"]}
-                else:
-                    return {"success": False, "error": data.get("Message", "Unknown error")}
+async def charge_card(self, token: str, account_id: str, amount: int) -> Dict[str, Any]:
+
+    url = f"{self.base_url}/payments/tokens/charge"
+    
+    payload = {
+        "Token": token,
+        "AccountId": account_id,
+        "Amount": amount / 100,  # В рублях
+        "Currency": "RUB",
+        "InvoiceId": f"sub_{account_id}_{int(datetime.utcnow().timestamp())}", 
+        "Description": f"Subscription payment for user {account_id}",
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                url,
+                json=payload,
+                headers={
+                    "Authorization": f"Basic {self.auth}",
+                    "Content-Type": "application/json"
+                }
+            )
+            
+        if response.status_code == 200:
+            data = response.json()я
+            if data.get("Success"):
+                return {
+                    "success": True, 
+                    "data": data.get("Model", {}),
+                    "message": "Payment initiated, waiting for webhook confirmation"
+                }
             else:
-                return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
-        except Exception as e:
-            logger.error(f"Error charging card: {e}")
-            return {"success": False, "error": str(e)}
+                return {
+                    "success": False, 
+                    "error": data.get("Message", "Unknown error"),
+                    "data": data.get("Model", {})
+                }
+        else:
+            return {
+                "success": False, 
+                "error": f"HTTP {response.status_code}: {response.text}"
+            }
+    except Exception as e:
+        logger.error(f"Error charging card: {e}")
+        return {"success": False, "error": str(e)}
     
     async def create_subscription(self, 
                                   token: str, 
