@@ -1,43 +1,51 @@
-import json
+import logging
 from typing import Dict, Optional, List
 from datetime import datetime, timedelta
-import logging
 import sys
-import os
 
 sys.path.append('/root/Anonimno-Artem-')
 import database
 
 from config import config
-from models import PlanType, SubscriptionStatus
 from cloudpayments import CloudPaymentsClient
 
 logger = logging.getLogger(__name__)
 
+
 class SubscriptionManager:
-    
+    """Token-charge subscription manager.
+
+    Responsibility split:
+    - scheduler: only initiates charges and moves to the next attempt after an
+      immediate CloudPayments API rejection;
+    - webhook: is the only place that grants/extends access after a payment
+      result is confirmed by CloudPayments.
+    """
+
+    PENDING_CHARGE_HOURS = 24
+
     def __init__(self):
         self.client = CloudPaymentsClient()
-        
         self.plan_amounts = {
             "HIGH": config.SUBSCRIPTION_PLANS["HIGH"][0],
             "MEDIUM": config.SUBSCRIPTION_PLANS["MEDIUM"][0],
-            "LOW": config.SUBSCRIPTION_PLANS["LOW"][0]
+            "LOW": config.SUBSCRIPTION_PLANS["LOW"][0],
         }
         self.plan_days = {
             "HIGH": config.SUBSCRIPTION_PLANS["HIGH"][1],
             "MEDIUM": config.SUBSCRIPTION_PLANS["MEDIUM"][1],
-            "LOW": config.SUBSCRIPTION_PLANS["LOW"][1]
+            "LOW": config.SUBSCRIPTION_PLANS["LOW"][1],
         }
-    
+        self.fallback_plan = {"HIGH": "MEDIUM", "MEDIUM": "LOW", "LOW": None}
+        self.next_plan_after_success = {"HIGH": "HIGH", "MEDIUM": "HIGH", "LOW": "MEDIUM"}
+
     async def get_user_subscription(self, user_id: str) -> Optional[dict]:
         try:
-            user_id_int = int(user_id)
-            return await database.get_subscription_by_user_id(user_id_int)
+            return await database.get_subscription_by_user_id(int(user_id))
         except Exception as e:
             logger.error(f"Error getting subscription for user {user_id}: {e}")
             return None
-    
+
     async def get_all_users_in_retry_low(self) -> List[str]:
         try:
             users = await database.get_all_users_in_retry_low()
@@ -45,58 +53,41 @@ class SubscriptionManager:
         except Exception as e:
             logger.error(f"Error getting retry_low users: {e}")
             return []
-    
+
     async def create_user_subscription(self, user_id: str, card_token: str) -> dict:
         try:
-            user_id_int = int(user_id)
             await database.create_subscription(
-                user_id=user_id_int,
+                user_id=int(user_id),
                 plan="HIGH",
                 status="inactive",
                 end_date=None,
-                card_token=card_token
+                card_token=card_token,
             )
-            logger.info(f"Created new subscription for user {user_id}")
             return await self.get_user_subscription(user_id)
         except Exception as e:
             logger.error(f"Error creating subscription for user {user_id}: {e}")
             return None
-    
+
     async def handle_initial_payment(self, user_id: str, card_token: str) -> Dict:
         try:
             subscription = await self.get_user_subscription(user_id)
             if not subscription:
                 subscription = await self.create_user_subscription(user_id, card_token)
-            
+
             if not card_token:
-                logger.error(f"User {user_id}: No card token provided!")
-                return {
-                    "success": False,
-                    "error": "No card token provided. Please pay first."
-                }
-            
-            logger.info(f"ℹ️ User {user_id}: Active system — no CloudPayments subscription created")
-            
+                return {"success": False, "error": "No card token provided. Please pay first."}
+
             end_date = datetime.utcnow() + timedelta(days=1)
-            await database.update_subscription_status(
-                user_id=int(user_id),
-                status="active",
-                end_date=end_date
-            )
-            await database.update_subscription_plan(
-                user_id=int(user_id),
-                plan="HIGH"
-            )
+            await database.update_subscription_status(int(user_id), "active", end_date)
+            await database.update_subscription_plan(int(user_id), "HIGH")
             await self._clear_retry_at(user_id)
-            
-            logger.info(f"User {user_id}: Initial payment successful, subscription active until {end_date}")
-            
+
             return {
                 "success": True,
                 "message": "Subscription activated for 1 day",
                 "access_until": end_date.isoformat(),
-                "next_amount": config.SUBSCRIPTION_PLANS["HIGH"][0] / 100,
-                "next_plan": "HIGH"
+                "next_amount": self.plan_amounts["HIGH"] / 100,
+                "next_plan": "HIGH",
             }
         except Exception as e:
             logger.error(f"Error in handle_initial_payment: {e}")
@@ -108,7 +99,7 @@ class SubscriptionManager:
             await conn.execute(
                 "UPDATE subscriptions SET next_retry_at = $1 WHERE user_id = $2",
                 when,
-                user_id
+                int(user_id),
             )
         finally:
             await database.release_conn(conn)
@@ -118,239 +109,367 @@ class SubscriptionManager:
         try:
             await conn.execute(
                 "UPDATE subscriptions SET next_retry_at = NULL WHERE user_id = $1",
-                int(user_id)
+                int(user_id),
             )
         finally:
             await database.release_conn(conn)
-    
+
+    async def _claim_charge_attempt(self, user_id: int, status: str) -> bool:
+        """Atomically claim one charge attempt.
+
+        This prevents the scheduler endpoint and the APScheduler job from
+        charging the same expired subscription concurrently.
+        """
+        conn = await database.get_conn()
+        try:
+            row = await conn.fetchrow(
+                """
+                UPDATE subscriptions
+                SET next_retry_at = NOW() + INTERVAL '24 hours'
+                WHERE user_id = $1
+                  AND status = $2
+                  AND (
+                      (
+                          status = 'active'
+                          AND end_date IS NOT NULL
+                          AND end_date < NOW()
+                          AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+                      )
+                      OR
+                      (
+                          status = 'retry_low'
+                          AND next_retry_at IS NOT NULL
+                          AND next_retry_at <= NOW()
+                      )
+                  )
+                RETURNING user_id
+                """,
+                int(user_id),
+                status,
+            )
+            return row is not None
+        finally:
+            await database.release_conn(conn)
+
+    async def _set_plan_for_next_attempt(self, user_id: int, plan: str):
+        conn = await database.get_conn()
+        try:
+            await conn.execute(
+                "UPDATE subscriptions SET plan = $1, next_retry_at = NULL WHERE user_id = $2",
+                plan,
+                int(user_id),
+            )
+        finally:
+            await database.release_conn(conn)
+
+    async def _move_to_retry_low(self, user_id: int):
+        next_retry_at = datetime.utcnow() + timedelta(days=1)
+        conn = await database.get_conn()
+        try:
+            await conn.execute(
+                """
+                UPDATE subscriptions
+                SET status = 'retry_low', plan = 'LOW', next_retry_at = $1
+                WHERE user_id = $2
+                """,
+                next_retry_at,
+                int(user_id),
+            )
+        finally:
+            await database.release_conn(conn)
+        return next_retry_at
+
     async def process_expired_subscription(self, user_id: int) -> Dict:
+        """Initiate charges only. Access is never extended here."""
         subscription = await self.get_user_subscription(str(user_id))
         if not subscription:
             return {"success": False, "error": "Subscription not found"}
-        
-        card_token = subscription.get('card_token')
+
+        card_token = subscription.get("card_token")
         if not card_token:
-            logger.error(f"User {user_id}: No card token found!")
             return {"success": False, "error": "No card token found"}
-        
-        status = subscription.get('status')
-        logger.info(f"🔄 Processing subscription for user {user_id} (status={status})")
 
-        # retry_low means: only retry the 99₽ charge once every 24 hours.
+        status = subscription.get("status")
+        if status not in ("active", "retry_low"):
+            return {"success": False, "status": status, "message": "Subscription is not chargeable"}
+
+        # retry_low is deliberately isolated: only LOW/99₽ and only once per 24h.
         if status == "retry_low":
-            result = await self.client.charge_card(card_token, str(user_id), 9900)
+            plan = "LOW"
+            if not await self._claim_charge_attempt(user_id, "retry_low"):
+                return {"success": False, "status": "retry_low", "message": "Charge attempt already claimed"}
 
+            result = await self.client.charge_card(card_token, str(user_id), self.plan_amounts[plan])
             if result["success"]:
-                await self._extend_subscription(user_id, 1, "LOW")
-                logger.info(f"✅ User {user_id}: Retry LOW 99₽ succeeded, extended for 1 day")
-                return {"success": True, "plan": "LOW", "days": 1, "retry": True}
+                logger.info(
+                    f"⏳ User {user_id}: LOW 99₽ charge accepted; waiting for webhook confirmation"
+                )
+                return {
+                    "success": True,
+                    "status": "payment_pending",
+                    "plan": "LOW",
+                    "amount": 99,
+                    "message": "Charge initiated; waiting for webhook",
+                }
 
             next_retry_at = datetime.utcnow() + timedelta(days=1)
             await self._set_next_retry_at(user_id, next_retry_at)
+            logger.warning(f"⚠️ User {user_id}: Retry LOW 99₽ failed; next attempt at {next_retry_at}")
+            return {
+                "success": False,
+                "status": "retry_low",
+                "next_retry_at": next_retry_at.isoformat(),
+            }
+
+        # Normal expired subscription: follow HIGH -> MEDIUM -> LOW.
+        plan = subscription.get("plan") or "HIGH"
+        if plan not in self.plan_amounts:
+            plan = "HIGH"
+
+        while plan:
+            if not await self._claim_charge_attempt(user_id, "active"):
+                return {"success": False, "message": "Charge attempt already claimed"}
+
+            amount = self.plan_amounts[plan]
+            result = await self.client.charge_card(card_token, str(user_id), amount)
+
+            if result["success"]:
+                logger.info(
+                    f"⏳ User {user_id}: {plan} ({amount / 100:.0f}₽) charge accepted; waiting for webhook"
+                )
+                return {
+                    "success": True,
+                    "status": "payment_pending",
+                    "plan": plan,
+                    "amount": amount / 100,
+                    "message": "Charge initiated; waiting for webhook",
+                }
+
+            next_plan = self.fallback_plan[plan]
+            if next_plan:
+                await self._set_plan_for_next_attempt(user_id, next_plan)
+                logger.warning(
+                    f"⚠️ User {user_id}: {plan} ({amount / 100:.0f}₽) rejected immediately; plan → {next_plan}"
+                )
+                plan = next_plan
+                subscription = await self.get_user_subscription(str(user_id))
+                if not subscription:
+                    return {"success": False, "error": "Subscription disappeared during fallback"}
+                card_token = subscription.get("card_token") or card_token
+                continue
+
+            next_retry_at = await self._move_to_retry_low(user_id)
             logger.warning(
-                f"⚠️ User {user_id}: Retry LOW 99₽ failed; next attempt at {next_retry_at}"
+                f"⚠️ User {user_id}: LOW 99₽ rejected immediately; status → retry_low, next attempt {next_retry_at}"
             )
             return {
                 "success": False,
                 "status": "retry_low",
-                "next_retry_at": next_retry_at.isoformat()
+                "next_retry_at": next_retry_at.isoformat(),
             }
-        
-        # Normal expired active subscription: keep the existing fallback chain.
-        logger.info(f"🔄 Processing expired subscription for user {user_id}")
-        
-        result = await self.client.charge_card(card_token, str(user_id), 69900)
-        
-        if result["success"]:
-            await self._extend_subscription(user_id, 7, "HIGH")
-            logger.info(f"✅ User {user_id}: Charged 699₽, extended for 7 days")
-            return {"success": True, "plan": "HIGH", "days": 7}
-        
-        logger.warning(f"⚠️ User {user_id}: HIGH (699₽) failed, trying MEDIUM...")
-        
-        result = await self.client.charge_card(card_token, str(user_id), 29900)
-        
-        if result["success"]:
-            await self._extend_subscription(user_id, 3, "MEDIUM")
-            logger.info(f"✅ User {user_id}: Charged 299₽, extended for 3 days")
-            return {"success": True, "plan": "MEDIUM", "days": 3}
-        
-        logger.warning(f"⚠️ User {user_id}: MEDIUM (299₽) failed, trying LOW...")
-        
-        result = await self.client.charge_card(card_token, str(user_id), 9900)
-        
-        if result["success"]:
-            await self._extend_subscription(user_id, 1, "LOW")
-            logger.info(f"✅ User {user_id}: Charged 99₽, extended for 1 day")
-            return {"success": True, "plan": "LOW", "days": 1}
-        
-        next_retry_at = datetime.utcnow() + timedelta(days=1)
-        await database.update_subscription_status(user_id, "retry_low")
-        await self._set_next_retry_at(user_id, next_retry_at)
-        logger.warning(
-            f"⚠️ User {user_id}: LOW (99₽) failed, status → retry_low; "
-            f"next attempt at {next_retry_at}"
-        )
-        return {
-            "success": False,
-            "status": "retry_low",
-            "next_retry_at": next_retry_at.isoformat()
-        }
-    
-    async def _extend_subscription(self, user_id: int, days: int, plan: str):
-        end_date = datetime.utcnow() + timedelta(days=days)
-        await database.update_subscription_status(user_id, 'active', end_date)
-        await database.update_subscription_plan(user_id, plan)
-        await self._clear_retry_at(user_id)
-        logger.info(f"✅ User {user_id}: Subscription extended to {end_date} (plan: {plan})")
-    
-    async def handle_payment_webhook(self, payload: dict) -> Dict:
-        """Обработка вебхуков для обратной совместимости"""
+
+        return {"success": False, "error": "No charge plan available"}
+
+    async def _process_recurrent_webhook_transaction(self, payload: dict) -> Dict:
+        """Process one recurrent webhook atomically and idempotently."""
         user_id = payload.get("AccountId")
+        transaction_id = payload.get("TransactionId")
         if not user_id:
-            logger.error("No AccountId in webhook")
             return {"success": False, "error": "No AccountId"}
-        
-        subscription = await self.get_user_subscription(user_id)
-        if not subscription:
-            logger.error(f"Subscription not found for user {user_id}")
-            return {"success": False, "error": "Subscription not found"}
-        
-        is_successful = payload.get("Status") == "Completed"
-        amount = int(payload.get("Amount", 0) * 100)
-        is_recurrent = payload.get("IsRecurrent", False)
+        if transaction_id is None:
+            return {"success": False, "error": "No TransactionId in recurrent webhook"}
+
+        try:
+            amount = int(round(float(payload.get("Amount", 0)) * 100))
+        except (TypeError, ValueError):
+            return {"success": False, "error": "Invalid Amount"}
+
+        status = payload.get("Status")
         card_token = payload.get("CardToken")
-        
+        transaction_key = str(transaction_id)
+
+        conn = await database.get_conn()
+        try:
+            async with conn.transaction():
+                # Serialize concurrent deliveries of the same CloudPayments transaction.
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", transaction_key)
+
+                existing = await conn.fetchrow(
+                    "SELECT transaction_id FROM payment_events WHERE transaction_id = $1",
+                    transaction_key,
+                )
+                if existing:
+                    logger.info(f"ℹ️ Transaction {transaction_key} already processed; webhook ignored")
+                    return {"success": True, "duplicate": True, "message": "Transaction already processed"}
+
+                subscription = await conn.fetchrow(
+                    """
+                    SELECT * FROM subscriptions
+                    WHERE user_id = $1
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    FOR UPDATE
+                    """,
+                    int(user_id),
+                )
+                if not subscription:
+                    return {"success": False, "error": "Subscription not found"}
+
+                if card_token:
+                    await conn.execute(
+                        "UPDATE subscriptions SET card_token = $1 WHERE user_id = $2",
+                        card_token,
+                        int(user_id),
+                    )
+
+                await conn.execute(
+                    """
+                    INSERT INTO payment_events (transaction_id, user_id, amount, status)
+                    VALUES ($1, $2, $3, $4)
+                    """,
+                    transaction_key,
+                    int(user_id),
+                    amount,
+                    status,
+                )
+
+                if status == "Completed":
+                    plan_by_amount = {
+                        self.plan_amounts["HIGH"]: "HIGH",
+                        self.plan_amounts["MEDIUM"]: "MEDIUM",
+                        self.plan_amounts["LOW"]: "LOW",
+                    }
+                    paid_plan = plan_by_amount.get(amount)
+                    if not paid_plan:
+                        return {"success": False, "error": f"Unknown amount: {amount}"}
+
+                    days = self.plan_days[paid_plan]
+                    next_plan = self.next_plan_after_success[paid_plan]
+                    end_date = datetime.utcnow() + timedelta(days=days)
+
+                    await conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET status = 'active',
+                            end_date = $1,
+                            plan = $2,
+                            next_retry_at = NULL
+                        WHERE user_id = $3
+                        """,
+                        end_date,
+                        next_plan,
+                        int(user_id),
+                    )
+
+                    logger.info(
+                        f"User {user_id}: ✅ recurrent transaction {transaction_key} completed: "
+                        f"{amount / 100:.0f}₽, +{days} days, next plan {next_plan}"
+                    )
+                    return {
+                        "success": True,
+                        "message": "Payment successful; subscription extended",
+                        "transaction_id": transaction_key,
+                        "paid_plan": paid_plan,
+                        "next_plan": next_plan,
+                        "amount": amount / 100,
+                        "days": days,
+                        "access_until": end_date.isoformat(),
+                    }
+
+                # A webhook-confirmed decline releases the scheduler claim and
+                # selects the next plan. The scheduler will initiate that charge.
+                plan_by_amount = {
+                    self.plan_amounts["HIGH"]: "HIGH",
+                    self.plan_amounts["MEDIUM"]: "MEDIUM",
+                    self.plan_amounts["LOW"]: "LOW",
+                }
+                failed_plan = plan_by_amount.get(amount)
+                if not failed_plan:
+                    return {"success": False, "error": f"Unknown amount: {amount}"}
+
+                next_plan = self.fallback_plan[failed_plan]
+                if next_plan:
+                    await conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET status = 'active', plan = $1, next_retry_at = NULL
+                        WHERE user_id = $2
+                        """,
+                        next_plan,
+                        int(user_id),
+                    )
+                    logger.info(
+                        f"User {user_id}: ❌ transaction {transaction_key} declined for {failed_plan}; "
+                        f"next plan → {next_plan}"
+                    )
+                    return {
+                        "success": False,
+                        "status": "next_plan",
+                        "transaction_id": transaction_key,
+                        "failed_plan": failed_plan,
+                        "next_plan": next_plan,
+                        "next_amount": self.plan_amounts[next_plan] / 100,
+                    }
+
+                next_retry_at = datetime.utcnow() + timedelta(days=1)
+                await conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET status = 'retry_low', plan = 'LOW', next_retry_at = $1
+                    WHERE user_id = $2
+                    """,
+                    next_retry_at,
+                    int(user_id),
+                )
+                logger.info(
+                    f"User {user_id}: ❌ transaction {transaction_key} declined for LOW; "
+                    f"retry_low next attempt at {next_retry_at}"
+                )
+                return {
+                    "success": False,
+                    "status": "retry_low",
+                    "transaction_id": transaction_key,
+                    "next_retry_at": next_retry_at.isoformat(),
+                }
+        finally:
+            await database.release_conn(conn)
+
+    async def handle_payment_webhook(self, payload: dict) -> Dict:
+        """Webhook is the single authority for recurrent payment results."""
+        user_id = payload.get("AccountId")
+        is_recurrent = payload.get("IsRecurrent", False)
+
+        if not user_id:
+            return {"success": False, "error": "No AccountId"}
+
+        card_token = payload.get("CardToken")
         if card_token:
             await database.save_card_token(int(user_id), card_token)
-        
+
         if not is_recurrent:
-            logger.info(f"User {user_id}: Initial payment processed")
             return {"success": True, "message": "Initial payment processed"}
-        
-        if is_successful:
-            return await self._handle_successful_payment(subscription, amount, user_id)
-        else:
-            return await self._handle_failed_payment(subscription, amount, user_id)
-    
-    async def _handle_successful_payment(self, subscription: dict, amount: int, user_id: str) -> Dict:
-        if amount == config.SUBSCRIPTION_PLANS["HIGH"][0]:
-            days = self.plan_days["HIGH"]
-            next_plan = "HIGH"
-            next_amount = config.SUBSCRIPTION_PLANS["HIGH"][0]
-            plan_name = "HIGH (699₽)"
-        elif amount == config.SUBSCRIPTION_PLANS["MEDIUM"][0]:
-            days = self.plan_days["MEDIUM"]
-            next_plan = "HIGH"
-            next_amount = config.SUBSCRIPTION_PLANS["HIGH"][0]
-            plan_name = "MEDIUM (299₽)"
-        elif amount == config.SUBSCRIPTION_PLANS["LOW"][0]:
-            days = self.plan_days["LOW"]
-            next_plan = "MEDIUM"
-            next_amount = config.SUBSCRIPTION_PLANS["MEDIUM"][0]
-            plan_name = "LOW (99₽)"
-        else:
-            logger.warning(f"User {user_id}: Unknown amount: {amount}")
-            return {"success": False, "error": f"Unknown amount: {amount}"}
-        
-        end_date = datetime.utcnow() + timedelta(days=days)
-        await database.update_subscription_status(
-            user_id=int(user_id),
-            status="active",
-            end_date=end_date
-        )
-        await database.update_subscription_plan(
-            user_id=int(user_id),
-            plan=next_plan
-        )
-        await self._clear_retry_at(user_id)
-        
-        logger.info(f"User {user_id}: ✅ {plan_name} paid successfully. Access for {days} days until {end_date}")
-        
-        return {
-            "success": True,
-            "message": f"Payment successful! Access for {days} days",
-            "plan": plan_name,
-            "amount": amount / 100,
-            "access_until": end_date.isoformat(),
-            "next_amount": next_amount / 100,
-            "next_plan": next_plan
-        }
-    
-    async def _handle_failed_payment(self, subscription: dict, amount: int, user_id: str) -> Dict:
-        current_amount = amount
-        
-        logger.info(f"User {user_id}: ❌ Payment failed: {current_amount/100}₽")
-        
-        if current_amount == config.SUBSCRIPTION_PLANS["HIGH"][0]:
-            next_amount = config.SUBSCRIPTION_PLANS["MEDIUM"][0]
-            next_plan = "MEDIUM"
-        elif current_amount == config.SUBSCRIPTION_PLANS["MEDIUM"][0]:
-            next_amount = config.SUBSCRIPTION_PLANS["LOW"][0]
-            next_plan = "LOW"
-        elif current_amount == config.SUBSCRIPTION_PLANS["LOW"][0]:
-            next_retry_at = datetime.utcnow() + timedelta(days=1)
-            await database.update_subscription_status(
-                user_id=int(user_id),
-                status="retry_low"
-            )
-            await self._set_next_retry_at(int(user_id), next_retry_at)
-            logger.info(
-                f"User {user_id}: All plans failed. Will retry LOW (99₽) daily; "
-                f"next attempt at {next_retry_at}"
-            )
-            return {
-                "success": False,
-                "message": "All plans failed. Will retry LOW plan (99₽) daily",
-                "status": "retry_low",
-                "next_retry_at": next_retry_at.isoformat()
-            }
-        else:
-            return {"success": False, "error": f"Unknown amount: {current_amount}"}
-        
-        subscription_id = subscription.get('subscription_id')
-        if subscription_id:
-            await self.client.update_subscription(
-                subscription_id=subscription_id,
-                amount=next_amount,
-                max_periods=1
-            )
-        
-        await database.update_subscription_plan(
-            user_id=int(user_id),
-            plan=next_plan
-        )
-        
-        logger.info(f"User {user_id}: Attempting {next_plan} plan ({next_amount/100}₽)")
-        
-        return {
-            "success": False,
-            "message": f"Attempting {next_plan} plan ({next_amount/100}₽)",
-            "next_amount": next_amount / 100,
-            "next_plan": next_plan
-        }
-    
+
+        return await self._process_recurrent_webhook_transaction(payload)
+
     async def handle_daily_low_retry(self, user_id: str) -> Dict:
-        """Оставлено для совместимости; реальные списания выполняет планировщик."""
         subscription = await self.get_user_subscription(user_id)
         if not subscription:
             return {"success": False, "error": "User not found"}
-        
-        if subscription.get('status') != 'retry_low':
+        if subscription.get("status") != "retry_low":
             return {"success": False, "message": "User is not in retry low state"}
-        
         return {
             "success": True,
             "message": "Daily retry is handled by the main expiration scheduler",
-            "amount": config.SUBSCRIPTION_PLANS["LOW"][0] / 100
+            "amount": self.plan_amounts["LOW"] / 100,
         }
-    
+
     async def check_expired_subscriptions(self) -> Dict:
         try:
             conn = await database.get_conn()
             try:
-                expired = await conn.fetch("""
-                    SELECT user_id, card_token, subscription_id, status, end_date, next_retry_at
+                rows = await conn.fetch(
+                    """
+                    SELECT user_id, card_token, subscription_id, status, end_date, next_retry_at, plan
                     FROM subscriptions
                     WHERE card_token IS NOT NULL
                       AND (
@@ -358,6 +477,7 @@ class SubscriptionManager:
                               status = 'active'
                               AND end_date IS NOT NULL
                               AND end_date < NOW()
+                              AND (next_retry_at IS NULL OR next_retry_at <= NOW())
                           )
                           OR
                           (
@@ -367,28 +487,21 @@ class SubscriptionManager:
                           )
                       )
                     ORDER BY COALESCE(next_retry_at, end_date) ASC
-                """)
-                
-                if not expired:
+                    """
+                )
+                if not rows:
                     return {"success": True, "expired_count": 0}
-                
-                logger.info(f"🔍 Found {len(expired)} subscriptions ready for charging")
-                
+
+                logger.info(f"🔍 Found {len(rows)} subscriptions ready for charging")
                 results = []
-                for row in expired:
-                    user_id = row['user_id']
+                for row in rows:
+                    user_id = row["user_id"]
                     result = await self.process_expired_subscription(user_id)
                     results.append({"user_id": user_id, "result": result})
-                
-                return {
-                    "success": True,
-                    "expired_count": len(expired),
-                    "results": results
-                }
-                
+
+                return {"success": True, "expired_count": len(rows), "results": results}
             finally:
                 await database.release_conn(conn)
-                
         except Exception as e:
             logger.error(f"❌ Error checking expired subscriptions: {e}")
             return {"success": False, "error": str(e)}
