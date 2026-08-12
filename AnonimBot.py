@@ -10,6 +10,7 @@ import database
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
+TELEGRAM_PROXY_URL = os.getenv("TELEGRAM_PROXY_URL")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -901,7 +902,14 @@ def main():
     asyncio.run(database.init_pool())
     asyncio.run(database.init_db())
 
-    app = Application.builder().token(TOKEN).build()
+    application_builder = Application.builder().token(TOKEN)
+    if TELEGRAM_PROXY_URL:
+        application_builder = (
+            application_builder
+            .proxy(TELEGRAM_PROXY_URL)
+            .get_updates_proxy(TELEGRAM_PROXY_URL)
+        )
+    app = application_builder.build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("info", info_command))
