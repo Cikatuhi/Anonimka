@@ -11,6 +11,7 @@ import database
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 TELEGRAM_PROXY_URL = os.getenv("TELEGRAM_PROXY_URL")
+TELEGRAM_PROXY_URL = TELEGRAM_PROXY_URL or os.getenv("TELEGRAM_PROXY")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -924,6 +925,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cancel_unsubscribe_handler, pattern="cancel_unsubscribe"))
 
     print("🤖 Бот запущен и готов к приёму анонимных сообщений...")
+    asyncio.set_event_loop(asyncio.new_event_loop())
     app.run_polling()
 
 
