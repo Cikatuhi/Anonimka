@@ -819,7 +819,14 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     username = user.username or ''
     first_name = user.first_name or 'Пользователь'
     
-    subscription = await database.get_subscription_by_user_id(user_id)
+    try:
+        subscription = await database.get_subscription_by_user_id(user_id)
+    except Exception:
+        logging.exception("/unsub: failed to read subscription for user %s", user_id)
+        await update.message.reply_text(
+            "⚠️ Не удалось проверить подписку. Попробуйте ещё раз через минуту."
+        )
+        return
     
     if not subscription:
         await update.message.reply_text(
@@ -828,7 +835,16 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     
-    if await database.is_user_unsubscribed(user_id):
+    try:
+        already_unsubscribed = await database.is_user_unsubscribed(user_id)
+    except Exception:
+        logging.exception("/unsub: failed to check unsubscribe state for user %s", user_id)
+        await update.message.reply_text(
+            "⚠️ Не удалось проверить статус подписки. Попробуйте ещё раз через минуту."
+        )
+        return
+
+    if already_unsubscribed:
         await update.message.reply_text(
             "ℹ️ Вы уже отписались от подписки.\n\n"
             "Если хотите оформить подписку снова — нажмите «👀 Узнать отправителя» в любом анонимном сообщении."
