@@ -1,0 +1,14 @@
+[Unit]
+Description=Payment Site (from Git)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Anonimno-Artem-
+ExecStart=/usr/bin/python3 /root/Anonimno-Artem-/payment_site.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

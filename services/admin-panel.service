@@ -1,0 +1,14 @@
+[Unit]
+Description=Admin Panel
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Anonimno-Artem-/admin-panel
+ExecStart=/usr/bin/python3 /root/Anonimno-Artem-/admin-panel/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

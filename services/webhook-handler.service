@@ -1,0 +1,14 @@
+[Unit]
+Description=Telegram Anonim Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Anonimno-Artem-
+ExecStart=/root/Anonimno-Artem-/venv/bin/python3 /root/Anonimno-Artem-/AnonimBot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
