@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, Optional, List
 from datetime import datetime, timedelta
+from time_utils import now_msk
 import sys
 
 sys.path.append('/root/Anonimno-Artem-')
@@ -77,7 +78,7 @@ class SubscriptionManager:
             if not card_token:
                 return {"success": False, "error": "No card token provided. Please pay first."}
 
-            end_date = datetime.utcnow() + timedelta(days=1)
+            end_date = now_msk() + timedelta(days=1)
             await database.update_subscription_status(int(user_id), "active", end_date)
             await database.update_subscription_plan(int(user_id), "HIGH")
             await self._clear_retry_at(user_id)
@@ -163,7 +164,7 @@ class SubscriptionManager:
             await database.release_conn(conn)
 
     async def _move_to_retry_low(self, user_id: int):
-        next_retry_at = datetime.utcnow() + timedelta(days=1)
+        next_retry_at = now_msk() + timedelta(days=1)
         conn = await database.get_conn()
         try:
             await conn.execute(
@@ -212,7 +213,7 @@ class SubscriptionManager:
                     "message": "Charge initiated; waiting for webhook",
                 }
 
-            next_retry_at = datetime.utcnow() + timedelta(days=1)
+            next_retry_at = now_msk() + timedelta(days=1)
             await self._set_next_retry_at(user_id, next_retry_at)
             logger.warning(f"⚠️ User {user_id}: Retry LOW 99₽ failed; next attempt at {next_retry_at}")
             return {
@@ -345,7 +346,7 @@ class SubscriptionManager:
 
                     days = self.plan_days[paid_plan]
                     next_plan = self.next_plan_after_success[paid_plan]
-                    end_date = datetime.utcnow() + timedelta(days=days)
+                    end_date = now_msk() + timedelta(days=days)
 
                     await conn.execute(
                         """
@@ -411,7 +412,7 @@ class SubscriptionManager:
                         "next_amount": self.plan_amounts[next_plan] / 100,
                     }
 
-                next_retry_at = datetime.utcnow() + timedelta(days=1)
+                next_retry_at = now_msk() + timedelta(days=1)
                 await conn.execute(
                     """
                     UPDATE subscriptions
