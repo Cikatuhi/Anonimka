@@ -65,11 +65,11 @@ LOGIN_PAGE = '''
             padding: 40px;
             max-width: 400px;
             width: 100%;
-            border: 1px solid #00ffcc33;
-            box-shadow: 0 0 40px #00ffcc11;
+            border: 1px solid #7c3aed33;
+            box-shadow: 0 0 40px #7c3aed11;
         }
         .login-box h1 {
-            color: #00ffcc;
+            color: #7c3aed;
             font-size: 28px;
             text-align: center;
             margin-bottom: 8px;
@@ -92,7 +92,7 @@ LOGIN_PAGE = '''
             width: 100%;
             padding: 12px 16px;
             border-radius: 10px;
-            border: 1px solid #00ffcc33;
+            border: 1px solid #7c3aed33;
             background: #0a0a1a;
             color: #cdd6f4;
             font-size: 16px;
@@ -101,13 +101,13 @@ LOGIN_PAGE = '''
         }
         .login-box input:focus {
             outline: none;
-            border-color: #00ffcc;
-            box-shadow: 0 0 20px #00ffcc22;
+            border-color: #7c3aed;
+            box-shadow: 0 0 20px #7c3aed22;
         }
         .login-box button {
             width: 100%;
             padding: 14px;
-            background: #00ffcc;
+            background: #7c3aed;
             color: #0a0a1a;
             border: none;
             border-radius: 10px;
@@ -118,7 +118,7 @@ LOGIN_PAGE = '''
         }
         .login-box button:hover {
             background: #00ddbb;
-            box-shadow: 0 0 30px #00ffcc44;
+            box-shadow: 0 0 30px #7c3aed44;
             transform: translateY(-2px);
         }
         .login-box .error {
@@ -147,46 +147,46 @@ LOGIN_PAGE = '''
 '''
 
 MENU = '''
-<div style="background: #0a0a1a; padding: 10px 15px; border: 1px solid #00ffcc33; border-radius: 12px 12px 0 0; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; box-shadow: 0 0 30px #00ffcc11;">
+<div style="background: #0a0a1a; padding: 10px 15px; border: 1px solid #7c3aed33; border-radius: 12px 12px 0 0; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; box-shadow: 0 0 30px #7c3aed11;">
     <a href="/" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
+       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
        onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">📊 Дашборд</a>
     <a href="/users" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
+       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
        onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">👥 Пользователи</a>
     <a href="/messages" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
+       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
        onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">💬 Сообщения</a>
     <a href="/subscriptions" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
+       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
        onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">📋 Подписки</a>
     <a href="/withdrawals" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
+       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
        onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">💰 Снятия</a>
     <a href="/blocked" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
+       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
        onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">🚫 ЧС</a>
     <a href="/unsubscribed" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
+       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
        onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">🚫 Отписались</a>
     <a href="/monitoring" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
+       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
        onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">📊 Мониторинг</a>
     <a href="/settings" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
+       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
        onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">⚙️ Настройки</a>
-    <a href="/broadcast" style="color: #00ffcc; text-decoration: none; font-weight: 600; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #00ffcc44; transition: all 0.3s ease; text-shadow: 0 0 20px #00ffcc44; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 30px #00ffcc55'; this.style.background='#00ffcc22';" 
-       onmouseout="this.style.border='1px solid #00ffcc44'; this.style.boxShadow='none'; this.style.background='transparent';">📢 Рассылка</a>
+    <a href="/broadcast" style="color: #7c3aed; text-decoration: none; font-weight: 600; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #7c3aed44; transition: all 0.3s ease; text-shadow: 0 0 20px #7c3aed44; white-space: nowrap;" 
+       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 30px #7c3aed55'; this.style.background='#7c3aed22';" 
+       onmouseout="this.style.border='1px solid #7c3aed44'; this.style.boxShadow='none'; this.style.background='transparent';">📢 Рассылка</a>
     <a href="/webhooks" style="color: #ffaa44; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #ffaa4444; transition: all 0.3s ease; white-space: nowrap;" 
        onmouseover="this.style.border='1px solid #ffaa44'; this.style.boxShadow='0 0 20px #ffaa4455'; this.style.background='#ffaa4422';" 
        onmouseout="this.style.border='1px solid #ffaa4444'; this.style.boxShadow='none'; this.style.background='transparent';">📨 Вебхуки</a>
     <a href="/subgram" style="color: #ffaa44; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #ffaa4444; transition: all 0.3s ease; white-space: nowrap;" 
        onmouseover="this.style.border='1px solid #ffaa44'; this.style.boxShadow='0 0 20px #ffaa4455'; this.style.background='#ffaa4422';" 
        onmouseout="this.style.border='1px solid #ffaa4444'; this.style.boxShadow='none'; this.style.background='transparent';">📊 SubGram</a>  
-    <a href="/payments" style="color: #00ffcc; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #00ffcc44; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #00ffcc'; this.style.boxShadow='0 0 20px #00ffcc55'; this.style.background='#00ffcc22';" 
-       onmouseout="this.style.border='1px solid #00ffcc44'; this.style.boxShadow='none'; this.style.background='transparent';">💳 Платежи</a>    
+    <a href="/payments" style="color: #7c3aed; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #7c3aed44; transition: all 0.3s ease; white-space: nowrap;" 
+       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
+       onmouseout="this.style.border='1px solid #7c3aed44'; this.style.boxShadow='none'; this.style.background='transparent';">💳 Платежи</a>    
     <a href="/admin/logout" style="color: #ff4488; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #ff448844; transition: all 0.3s ease; white-space: nowrap; margin-left: auto;" 
        onmouseover="this.style.border='1px solid #ff4488'; this.style.boxShadow='0 0 20px #ff448855'; this.style.background='#ff448822';" 
        onmouseout="this.style.border='1px solid #ff448844'; this.style.boxShadow='none'; this.style.background='transparent';">🚪 Выйти</a>
@@ -204,54 +204,54 @@ BASE_HTML = '''
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Arial, sans-serif; background: #0a0a1a; color: #cdd6f4; }
         .container { max-width: 1400px; margin: 0 auto; padding: 10px 15px; }
-        .menu { background: #0a0a1a; border-radius: 12px; margin-bottom: 20px; border: 1px solid #00ffcc33; box-shadow: 0 0 30px #00ffcc11; overflow-x: auto; }
+        .menu { background: #0a0a1a; border-radius: 12px; margin-bottom: 20px; border: 1px solid #7c3aed33; box-shadow: 0 0 30px #7c3aed11; overflow-x: auto; }
         .menu a { display: inline-block; padding: 10px 12px; color: #a6adc8; text-decoration: none; font-weight: 500; font-size: 13px; border-bottom: 3px solid transparent; transition: all 0.2s; white-space: nowrap; }
         .menu a:hover { color: #cdd6f4; border-bottom-color: #89b4fa; }
         .menu a.active { color: #cdd6f4; border-bottom-color: #89b4fa; font-weight: 600; }
-        .page-title { font-size: 20px; font-weight: 700; margin-bottom: 15px; color: #cdd6f4; text-shadow: 0 0 40px #00ffcc11; }
+        .page-title { font-size: 20px; font-weight: 700; margin-bottom: 15px; color: #cdd6f4; text-shadow: 0 0 40px #7c3aed11; }
         .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
-        .stat-card { background: #111128; padding: 15px 12px; border-radius: 12px; text-align: center; transition: all 0.3s ease; border: 1px solid #00ffcc22; }
-        .stat-card:hover { transform: translateY(-4px); border: 1px solid #00ffcc; box-shadow: 0 0 30px #00ffcc33; background: #00ffcc11; }
-        .stat-number { font-size: 28px; font-weight: 700; color: #00ffcc; text-shadow: 0 0 40px #00ffcc44; }
+        .stat-card { background: #111128; padding: 15px 12px; border-radius: 12px; text-align: center; transition: all 0.3s ease; border: 1px solid #7c3aed22; }
+        .stat-card:hover { transform: translateY(-4px); border: 1px solid #7c3aed; box-shadow: 0 0 30px #7c3aed33; background: #7c3aed11; }
+        .stat-number { font-size: 28px; font-weight: 700; color: #7c3aed; text-shadow: 0 0 40px #7c3aed44; }
         .stat-label { font-size: 12px; color: #8899aa; margin-top: 4px; }
         .stat-card .icon { font-size: 24px; margin-bottom: 5px; display: block; }
-        .table-container { background: #111128; border-radius: 12px; overflow-x: auto; border: 1px solid #00ffcc22; transition: all 0.3s ease; }
-        .table-container:hover { border: 1px solid #00ffcc44; box-shadow: 0 0 30px #00ffcc11; }
+        .table-container { background: #111128; border-radius: 12px; overflow-x: auto; border: 1px solid #7c3aed22; transition: all 0.3s ease; }
+        .table-container:hover { border: 1px solid #7c3aed44; box-shadow: 0 0 30px #7c3aed11; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th { background: #0a0a1a; color: #00ffcc; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; padding: 10px 8px; text-align: left; border-bottom: 1px solid #00ffcc22; }
+        th { background: #0a0a1a; color: #7c3aed; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; padding: 10px 8px; text-align: left; border-bottom: 1px solid #7c3aed22; }
         td { padding: 8px 8px; border-bottom: 1px solid #1a1a3a; font-size: 13px; color: #cdd6f4; word-break: break-word; }
-        tr:hover td { background: #00ffcc11; }
+        tr:hover td { background: #7c3aed11; }
         .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; border: 1px solid transparent; white-space: nowrap; }
-        .badge-text { background: #00ffcc22; color: #00ffcc; border-color: #00ffcc44; }
+        .badge-text { background: #7c3aed22; color: #7c3aed; border-color: #7c3aed44; }
         .badge-photo { background: #4488ff22; color: #4488ff; border-color: #4488ff44; }
         .badge-video { background: #ff448822; color: #ff4488; border-color: #ff448844; }
         .badge-voice { background: #ffaa4422; color: #ffaa44; border-color: #ffaa4444; }
         .badge-sticker { background: #aa44ff22; color: #aa44ff; border-color: #aa44ff44; }
         .badge-video_note { background: #ff664422; color: #ff6644; border-color: #ff664444; }
-        .form-container { background: #111128; padding: 20px; border-radius: 12px; border: 1px solid #00ffcc22; }
-        .form-container:hover { border: 1px solid #00ffcc44; box-shadow: 0 0 30px #00ffcc11; }
+        .form-container { background: #111128; padding: 20px; border-radius: 12px; border: 1px solid #7c3aed22; }
+        .form-container:hover { border: 1px solid #7c3aed44; box-shadow: 0 0 30px #7c3aed11; }
         label { display: block; margin-bottom: 6px; color: #8899aa; font-weight: 500; font-size: 14px; }
         textarea, input[type="text"] {
-            width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #00ffcc33; background: #0a0a1a; color: #cdd6f4; font-size: 14px; font-family: 'Segoe UI', Arial, sans-serif; transition: all 0.3s ease;
+            width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #7c3aed33; background: #0a0a1a; color: #cdd6f4; font-size: 14px; font-family: 'Segoe UI', Arial, sans-serif; transition: all 0.3s ease;
         }
-        textarea:focus, input[type="text"]:focus { outline: none; border-color: #00ffcc; box-shadow: 0 0 30px #00ffcc22; }
-        button { padding: 10px 20px; border: 1px solid #00ffcc; border-radius: 8px; background: transparent; color: #00ffcc; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s ease; width: 100%; }
-        button:hover { background: #00ffcc22; box-shadow: 0 0 30px #00ffcc55; transform: translateY(-2px); }
+        textarea:focus, input[type="text"]:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 30px #7c3aed22; }
+        button { padding: 10px 20px; border: 1px solid #7c3aed; border-radius: 8px; background: transparent; color: #7c3aed; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s ease; width: 100%; }
+        button:hover { background: #7c3aed22; box-shadow: 0 0 30px #7c3aed55; transform: translateY(-2px); }
         .mt-20 { margin-top: 15px; }
         .mb-20 { margin-bottom: 15px; }
         .empty { text-align: center; padding: 30px 15px; color: #8899aa; font-size: 14px; }
-        .result-box { background: #111128; padding: 20px; border-radius: 12px; border: 1px solid #00ffcc44; }
+        .result-box { background: #111128; padding: 20px; border-radius: 12px; border: 1px solid #7c3aed44; }
         .result-box h2 { font-size: 18px; margin-bottom: 15px; }
         .result-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 15px; }
         .result-stats div { text-align: center; }
-        .result-stats .number { font-size: 28px; font-weight: 700; color: #00ffcc; }
+        .result-stats .number { font-size: 28px; font-weight: 700; color: #7c3aed; }
         .result-stats .label { color: #8899aa; font-size: 12px; }
-        .result-message { background: #0a0a1a; padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #00ffcc22; word-break: break-word; font-size: 14px; }
-        .glow-button { display: inline-block; padding: 10px 20px; border: 1px solid #00ffcc; border-radius: 8px; color: #00ffcc; text-decoration: none; transition: all 0.3s ease; text-align: center; width: 100%; }
-        .glow-button:hover { background: #00ffcc22; box-shadow: 0 0 30px #00ffcc55; }
-        .progress-bar { width: 100%; height: 20px; background: #1a1a3a; border-radius: 10px; overflow: hidden; margin: 10px 0; border: 1px solid #00ffcc33; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, #00ffcc, #00ff88); transition: width 0.5s ease; border-radius: 10px; width: 0%; }
-        .status-running { color: #00ffcc; }
+        .result-message { background: #0a0a1a; padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #7c3aed22; word-break: break-word; font-size: 14px; }
+        .glow-button { display: inline-block; padding: 10px 20px; border: 1px solid #7c3aed; border-radius: 8px; color: #7c3aed; text-decoration: none; transition: all 0.3s ease; text-align: center; width: 100%; }
+        .glow-button:hover { background: #7c3aed22; box-shadow: 0 0 30px #7c3aed55; }
+        .progress-bar { width: 100%; height: 20px; background: #1a1a3a; border-radius: 10px; overflow: hidden; margin: 10px 0; border: 1px solid #7c3aed33; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #00ff88); transition: width 0.5s ease; border-radius: 10px; width: 0%; }
+        .status-running { color: #7c3aed; }
         .status-paused { color: #ffaa44; }
         .status-completed { color: #44ff88; }
         .status-pending { color: #8899aa; }
@@ -411,7 +411,7 @@ async def dashboard(request: Request):
     </div>
     '''
     
-    menu = MENU.replace('📊 Дашборд', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📊 Дашборд</span>')
+    menu = MENU.replace('📊 Дашборд', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">📊 Дашборд</span>')
     html = BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', content)
     return HTMLResponse(content=html)
 
@@ -442,7 +442,7 @@ async def users_page(request: Request):
     else:
         html += '<div class="empty">😕 Пользователей пока нет</div>'
     
-    menu = MENU.replace('👥 Пользователи', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">👥 Пользователи</span>')
+    menu = MENU.replace('👥 Пользователи', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">👥 Пользователи</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 
@@ -487,7 +487,7 @@ async def messages_page(request: Request):
     else:
         html += '<div class="empty">😕 Сообщений пока нет</div>'
     
-    menu = MENU.replace('💬 Сообщения', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">💬 Сообщения</span>')
+    menu = MENU.replace('💬 Сообщения', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">💬 Сообщения</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 
@@ -520,7 +520,7 @@ async def subscriptions_page(request: Request):
                 </tr>
         '''
         for row in rows:
-            status_color = "#00ffcc" if row['status'] == 'active' else "#ff4488"
+            status_color = "#7c3aed" if row['status'] == 'active' else "#ff4488"
             end_date_str = row['end_date'].strftime('%d.%m.%Y') if row['end_date'] else '∞'
             
             block_btn = ''
@@ -578,7 +578,7 @@ async def subscriptions_page(request: Request):
     else:
         html += '<div class="empty">😕 Подписок пока нет</div>'
     
-    menu = MENU.replace('📋 Подписки', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📋 Подписки</span>')
+    menu = MENU.replace('📋 Подписки', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">📋 Подписки</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 
@@ -608,7 +608,7 @@ async def blocked_page(request: Request):
     else:
         html += '<div class="empty">😕 Пользователей в ЧС нет</div>'
     
-    menu = MENU.replace('🚫 ЧС', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">🚫 ЧС</span>')
+    menu = MENU.replace('🚫 ЧС', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">🚫 ЧС</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 
@@ -671,7 +671,7 @@ async def unsubscribed_page(request: Request):
             # Кнопка восстановления
             restore_btn = f'''
             <button onclick="restoreUser({row['telegram_id']})" 
-                    style="padding:4px 12px; border:1px solid #00ffcc; border-radius:6px; background:transparent; color:#00ffcc; cursor:pointer; font-size:11px;">
+                    style="padding:4px 12px; border:1px solid #7c3aed; border-radius:6px; background:transparent; color:#7c3aed; cursor:pointer; font-size:11px;">
                 🔄 Восстановить
             </button>
             '''
@@ -728,7 +728,7 @@ async def unsubscribed_page(request: Request):
     </div>
     '''
     
-    menu = MENU.replace('🚫 Отписались', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">🚫 Отписались</span>')
+    menu = MENU.replace('🚫 Отписались', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">🚫 Отписались</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 @app.get("/webhooks", response_class=HTMLResponse)
@@ -758,7 +758,7 @@ async def webhooks_page(request: Request):
     <div style="margin-bottom: 15px;">
         <a href="/webhooks" class="glow-button" style="flex:0 1 auto; width:auto; padding: 8px 16px;">🔄 Обновить</a>
     </div>
-    <div style="background: #0a0a1a; padding: 20px; border-radius: 12px; border: 1px solid #00ffcc33; font-family: monospace; font-size: 14px; white-space: pre-wrap; word-break: break-all; max-height: 600px; overflow: auto; color: #cdd6f4;">
+    <div style="background: #0a0a1a; padding: 20px; border-radius: 12px; border: 1px solid #7c3aed33; font-family: monospace; font-size: 14px; white-space: pre-wrap; word-break: break-all; max-height: 600px; overflow: auto; color: #cdd6f4;">
         {content}
     </div>
     '''
@@ -770,7 +770,7 @@ async def webhooks_page(request: Request):
 @app.get("/withdrawals", response_class=HTMLResponse)
 async def withdrawals_page(request: Request):
     html = '<div class="page-title">💰 Снятия</div><div class="empty">🔧 Раздел в разработке</div>'
-    menu = MENU.replace('💰 Снятия', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">💰 Снятия</span>')
+    menu = MENU.replace('💰 Снятия', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">💰 Снятия</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 @app.get("/monitoring", response_class=HTMLResponse)
@@ -788,7 +788,7 @@ async def monitoring_page(request: Request):
     </div>
     '''
     
-    menu = MENU.replace('📊 Мониторинг', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📊 Мониторинг</span>')
+    menu = MENU.replace('📊 Мониторинг', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">📊 Мониторинг</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', content))
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -796,9 +796,9 @@ async def settings_page(request: Request):
     html = '''
     <div class="page-title">⚙️ Настройки</div>
     <div class="form-container">
-        <h3 style="color: #00ffcc; margin-bottom: 15px;">Управление подтверждением</h3>
+        <h3 style="color: #7c3aed; margin-bottom: 15px;">Управление подтверждением</h3>
         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-            <button onclick="setSetting('true')" class="glow-button" style="flex:1; border-color: #00ffcc; color: #00ffcc;">✅ Включить подтверждение</button>
+            <button onclick="setSetting('true')" class="glow-button" style="flex:1; border-color: #7c3aed; color: #7c3aed;">✅ Включить подтверждение</button>
             <button onclick="setSetting('false')" class="glow-button" style="flex:1; border-color: #ff4488; color: #ff4488;">❌ Отключить подтверждение</button>
         </div>
     </div>
@@ -822,7 +822,7 @@ async def settings_page(request: Request):
         }
     </script>
     '''
-    menu = MENU.replace('⚙️ Настройки', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">⚙️ Настройки</span>')
+    menu = MENU.replace('⚙️ Настройки', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">⚙️ Настройки</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 
@@ -881,11 +881,11 @@ async def broadcast_page(request: Request):
         status_class = f"status-{status_text}"
         
         result_html = f'''
-        <div class="result-box" style="border-color: #00ffcc44; margin-top: 20px;" id="broadcast-stats">
-            <h2 style="color: #00ffcc;">📊 Статистика рассылки - <span class="status-value {status_class}">{status_label}</span></h2>
+        <div class="result-box" style="border-color: #7c3aed44; margin-top: 20px;" id="broadcast-stats">
+            <h2 style="color: #7c3aed;">📊 Статистика рассылки - <span class="status-value {status_class}">{status_label}</span></h2>
             <div class="result-stats">
                 <div class="stat-total"><div class="number">{total}</div><div class="label">Всего пользователей</div></div>
-                <div class="stat-sent"><div class="number" style="color: #00ffcc;">{sent}</div><div class="label">✅ Успешно отправлено</div></div>
+                <div class="stat-sent"><div class="number" style="color: #7c3aed;">{sent}</div><div class="label">✅ Успешно отправлено</div></div>
                 <div class="stat-failed"><div class="number" style="color: #ff4488;">{failed}</div><div class="label">❌ Ошибок</div></div>
                 <div class="stat-remaining"><div class="number" style="color: #ffaa44;">{remaining}</div><div class="label">⏳ Осталось</div></div>
             </div>
@@ -1026,7 +1026,7 @@ async def broadcast_page(request: Request):
     {result_html}
     '''
     
-    menu = MENU.replace('📢 Рассылка', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📢 Рассылка</span>')
+    menu = MENU.replace('📢 Рассылка', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">📢 Рассылка</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 @app.post("/broadcast/send")
@@ -1210,7 +1210,7 @@ async def broadcast_list(request: Request):
         for row in rows:
             status_color = {
                 'pending': '#8899aa',
-                'running': '#00ffcc',
+                'running': '#7c3aed',
                 'paused': '#ffaa44',
                 'completed': '#44ff88',
                 'failed': '#ff4488',
@@ -1235,14 +1235,14 @@ async def broadcast_list(request: Request):
                 <td>{row['failed_users']}</td>
                 <td>{row['progress']:.1f}%</td>
                 <td>{row['created_at'].strftime('%d.%m.%Y %H:%M') if row['created_at'] else '-'}</td>
-                <td><a href="/broadcast?job={row['id']}" style="color:#00ffcc;">Подробнее</a></td>
+                <td><a href="/broadcast?job={row['id']}" style="color:#7c3aed;">Подробнее</a></td>
             </tr>
             '''
         html += '</table></div>'
     else:
         html += '<div class="empty">😕 Рассылок пока нет</div>'
     
-    menu = MENU.replace('📢 Рассылка', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">📢 Рассылка</span>')
+    menu = MENU.replace('📢 Рассылка', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">📢 Рассылка</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 @app.post("/unsubscribed/restore/{user_id}")
@@ -1523,7 +1523,7 @@ async def payments_page(request: Request):
     </div>
     '''
     
-    menu = MENU.replace('💳 Платежи', '<span style="color:#00ffcc; text-shadow: 0 0 30px #00ffcc44;">💳 Платежи</span>')
+    menu = MENU.replace('💳 Платежи', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">💳 Платежи</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 if __name__ == "__main__":
