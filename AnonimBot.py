@@ -6,12 +6,14 @@ from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
+from telegram.request import HTTPXRequest
 import database
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 TELEGRAM_PROXY_URL = os.getenv("TELEGRAM_PROXY_URL")
 TELEGRAM_PROXY_URL = TELEGRAM_PROXY_URL or os.getenv("TELEGRAM_PROXY")
+PROXY_URL = "socks5://localhost:1080"
 
 logging.basicConfig(level=logging.INFO)
 
@@ -20,6 +22,15 @@ reply_sessions = {}
 MAX_SESSIONS = 1000
 
 ADMIN_ID = 7683869901
+
+request = HTTPXRequest(
+    proxy=PROXY_URL,
+    connect_timeout=60.0,
+    read_timeout=60.0,
+    write_timeout=60.0,
+)
+
+app = Application.builder().token(TOKEN).request(request).build()
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
