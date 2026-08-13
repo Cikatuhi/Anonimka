@@ -7,6 +7,7 @@ import psutil
 from datetime import datetime
 import database
 from dotenv import load_dotenv
+from time_utils import now_msk
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -36,7 +37,7 @@ async def update_job_status(job_id, status, **kwargs):
 async def process_job(job):
     job_id = job['id']
     
-    await update_job_status(job_id, 'running', started_at=datetime.now())
+    await update_job_status(job_id, 'running', started_at=now_msk())
     
     user_ids = json.loads(job['user_ids_json'])
     message = job['message']
@@ -80,7 +81,7 @@ async def process_job(job):
             if i % 10 == 0 and i > 0:
                 cpu = psutil.cpu_percent()
                 if cpu > 80:
-                    await update_job_status(job_id, 'paused', paused_at=datetime.now())
+                    await update_job_status(job_id, 'paused', paused_at=now_msk())
                     while psutil.cpu_percent() > 60:
                         await asyncio.sleep(5)
                     current_status = await get_job_status(job_id)
@@ -137,7 +138,7 @@ async def process_job(job):
         failed_users=results['failed'],
         blocked_users=results['blocked'],
         progress=100,
-        finished_at=datetime.now()
+        finished_at=now_msk()
     )
     print(f"✅ Задача {job_id} завершена")
 
