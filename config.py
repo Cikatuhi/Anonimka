@@ -9,7 +9,7 @@ load_dotenv()
 class Config:
 
     PUBLIC_ID: str = os.getenv("CLOUDPAYMENTS_PUBLIC_ID", "pk_cfc9c99ee447f06de34f6cd148a22")
-    API_SECRET: str = os.getenv("CLOUDPAYMENTS_API_SECRET", "b4a73077265e848f6c300c6ab661a4bb")
+    API_SECRET: str = os.environ["CLOUDPAYMENTS_API_SECRET"]
     API_URL: str = "https://api.cloudpayments.ru"
 
     SUBSCRIPTION_PLANS: Dict[str, Tuple[int, int]] = field(
