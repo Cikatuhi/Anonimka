@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from cloudpayments import CloudPaymentsClient
+from time_utils import now_msk
 import database
 
 load_dotenv()
@@ -307,8 +308,8 @@ def create_session(username: str) -> str:
     token = str(uuid.uuid4())
     sessions[token] = {
         "username": username,
-        "created_at": datetime.now(),
-        "expires_at": datetime.now() + timedelta(hours=24)
+        "created_at": now_msk(),
+        "expires_at": now_msk() + timedelta(hours=24)
     }
     return token
 
@@ -316,7 +317,7 @@ def get_session_user(token: str) -> dict:
     if token not in sessions:
         return None
     session = sessions[token]
-    if session["expires_at"] < datetime.now():
+    if session["expires_at"] < now_msk():
         del sessions[token]
         return None
     return session
@@ -1265,7 +1266,7 @@ async def restore_subscription(user_id: int):
             subscription_id = unsub_row.get('subscription_id')
             
             # ===== 2. Восстанавливаем подписку в БД =====
-            end_date = datetime.now() + timedelta(days=7)
+            end_date = now_msk() + timedelta(days=7)
             
             # Проверяем, есть ли уже подписка
             existing = await conn.fetchrow(
