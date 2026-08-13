@@ -3,6 +3,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from subscription import SubscriptionManager
+from time_utils import now_msk
 import database
 from config import config
 
@@ -82,7 +83,7 @@ async def handle_webhook(request: Request):
                 existing_subscription = await database.get_subscription_by_user_id(user_id)
 
                 if existing_subscription:
-                    end_date = datetime.now() + timedelta(days=1)
+                    end_date = now_msk() + timedelta(days=1)
                     await database.update_subscription_status(
                         user_id, "active", end_date
                     )
@@ -97,7 +98,7 @@ async def handle_webhook(request: Request):
                         f"(active token-charge system)"
                     )
                 else:
-                    end_date = datetime.now() + timedelta(days=1)
+                    end_date = now_msk() + timedelta(days=1)
                     await database.create_subscription(
                         user_id=user_id,
                         plan="HIGH",
