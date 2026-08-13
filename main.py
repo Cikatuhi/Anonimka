@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from time_utils import now_msk
 
 import database
 from webhook_handler import router
@@ -46,7 +47,7 @@ async def lifespan(app: FastAPI):
     try:
         await conn.execute("""
             ALTER TABLE subscriptions
-            ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP
+            ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_subscriptions_next_retry_at
