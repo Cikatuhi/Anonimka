@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from time_utils import now_msk
 import httpx
 import os
 import sys
@@ -902,7 +903,7 @@ async def webhook_handler(request: Request):
         print(f"📥 WEBHOOK BODY:\n{raw_body}")
         
         with open("/root/main-site/webhook.log", "a") as f:
-            f.write(f"\n=== {datetime.now()} ===\n")
+            f.write(f"\n=== {now_msk()} ===\n")
             f.write(raw_body + "\n")
 
         account_id = body.get("AccountId") or body.get("InvoiceId") or body.get("externalId") or body.get("account_id")
