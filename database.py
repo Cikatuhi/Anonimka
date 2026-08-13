@@ -15,6 +15,7 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
+SUBGRAM_API_TOKEN = os.getenv("SUBGRAM_API_TOKEN", "")
 SUBGRAM_API_KEY = os.getenv("SUBGRAM_API_KEY", "")
 # ============================================
 # ПРОСТЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С БД (без пула)
@@ -543,6 +544,36 @@ async def check_subgram(user_id: int, chat_id: int) -> dict:
                 if response.status == 200:
                     data = await response.json()
                     print(f"🔍 SubGram ответ для {user_id}: {data}")
+                    return data
+                else:
+                    print(f"❌ SubGram ошибка: {response.status}")
+                    return {"status": "error", "message": f"HTTP {response.status}"}
+    except Exception as e:
+        print(f"❌ SubGram исключение: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+
+async def get_subgram_balance() -> dict:
+    """
+    Получает баланс и статистику по ботам из SubGram.
+    Документация: https://api.subgram.org/api-docs#get-balance
+    """
+    if not SUBGRAM_API_TOKEN:
+        return {"status": "error", "message": "SUBGRAM_API_TOKEN не настроен"}
+
+    url = "https://api.subgram.org/get-balance"
+    headers = {
+        "Auth": SUBGRAM_API_TOKEN,
+        "Content-Type": "application/json"
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json={}, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    print(f"🔍 SubGram Balance ответ: {data}")
                     return data
                 else:
                     print(f"❌ SubGram ошибка: {response.status}")
