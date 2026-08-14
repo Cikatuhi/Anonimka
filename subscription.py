@@ -443,9 +443,6 @@ class SubscriptionManager:
         if not user_id:
             return {"success": False, "error": "No AccountId"}
 
-        card_token = payload.get("CardToken")
-        if card_token:
-            await database.save_card_token(int(user_id), card_token)
 
         if not is_recurrent:
             return {"success": True, "message": "Initial payment processed"}
