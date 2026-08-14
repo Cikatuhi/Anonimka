@@ -39,18 +39,16 @@ class CloudPaymentsClient:
                 )
 
             logger.info(
-                "CloudPayments charge response: HTTP %s, body=%s",
-                response.status_code,
-                response.text
+                "CloudPayments charge response: HTTP %s",
+                response.status_code
             )
             
             if response.status_code == 200:
                 data = response.json()
                 logger.info(
-                    "CloudPayments charge parsed response: Success=%s, Message=%s, Model=%s",
+                    "CloudPayments charge parsed response: Success=%s, Message=%s",
                     data.get("Success"),
-                    data.get("Message"),
-                    data.get("Model")
+                    data.get("Message")
                 )
                 if data.get("Success"):
                     return {
@@ -66,13 +64,12 @@ class CloudPaymentsClient:
                     }
             else:
                 logger.error(
-                    "CloudPayments charge HTTP error: status=%s, body=%s",
-                    response.status_code,
-                    response.text
+                    "CloudPayments charge HTTP error: status=%s",
+                    response.status_code
                 )
                 return {
                     "success": False,
-                    "error": f"HTTP {response.status_code}: {response.text}"
+                    "error": f"HTTP {response.status_code}"
                 }
         except Exception as e:
             logger.error(f"Error charging card: {e}")
