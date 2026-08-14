@@ -7,11 +7,22 @@ import os
 import sys
 import json
 from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
 
 sys.path.append('/root/Anonimno-Artem-')
 import database
 
-app = FastAPI(title="Anonimka — Документация и оплата")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await database.init_pool()
+    print("Database pool initialized", flush=True)
+    try:
+        yield
+    finally:
+        await database.close_pool()
+        print("Database pool closed", flush=True)
+
+app = FastAPI(title="Anonimka — Документация и оплата", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,10 +32,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.on_event("startup")
-async def startup():
-    await database.init_pool()
-    print("✅ БД инициализирована")
 
 
 # Используем словарь для кеша
