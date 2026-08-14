@@ -9,8 +9,6 @@ WorkingDirectory=/root/Anonimno-Artem-
 ExecStart=/root/Anonimno-Artem-/venv/bin/python /root/Anonimno-Artem-/admin_panel.py
 Restart=always
 RestartSec=10
-StandardOutput=append:/root/Anonimno-Artem-/admin-panel.log
-StandardError=append:/root/Anonimno-Artem-/admin-panel-error.log
 
 [Install]
 WantedBy=multi-user.target
