@@ -27,14 +27,6 @@ async def startup():
     print("✅ БД инициализирована")
 
 
-async def get_show_checkboxes() -> bool:
-    try:
-        value = await database.get_setting('show_payment_checkboxes', 'true')
-        return value == 'true'
-    except Exception as e:
-        print(f"❌ Ошибка получения настройки: {e}")
-        return True
-
 # Используем словарь для кеша
 settings_cache = {}
 
