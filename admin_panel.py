@@ -24,14 +24,14 @@ ADMINS = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 Инициализация БД...")
+    print("🚀 Инициализация БД...", flush=True)
     await database.init_pool()
-    print("✅ БД готова")
-    yield
-    if database.pool:
-        await database.pool.close()
-        print("🛑 Соединения с БД закрыты")
-
+    print("✅ БД готова", flush=True)
+    try:
+        yield
+    finally:
+        await database.close_pool()
+        print("🛑 Соединения с БД закрыты", flush=True)
 app = FastAPI(title="Admin Panel для Telegram Бота", lifespan=lifespan)
 
 app.add_middleware(
