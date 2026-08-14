@@ -21,15 +21,18 @@ SUBGRAM_API_KEY = os.getenv("SUBGRAM_API_KEY", "")
 # ПРОСТЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С БД (без пула)
 # ============================================
 
+pool = None
+_pool_lock = asyncio.Lock()
+
 async def get_conn():
-    """Создаёт НОВОЕ соединение для каждого запроса"""
-    return await asyncpg.connect(DATABASE_URL)
+    """Gets a connection from the process-local pool."""
+    await init_pool()
+    return await pool.acquire()
 
 async def release_conn(conn):
-    """Закрывает соединение"""
-    if conn:
-        await conn.close()
-
+    """Returns a connection to the pool."""
+    if conn is not None and pool is not None:
+        await pool.release(conn)
 # ============================================
 # ФУНКЦИИ ДЛЯ АДМИНКИ (отдельные соединения)
 # ============================================
@@ -513,9 +516,25 @@ async def get_expired_subscriptions():
         await release_conn(conn)
 
 async def init_pool():
-    """Пустая функция для совместимости"""
-    pass
+    """Creates one connection pool for the current process."""
+    global pool
+    if pool is None:
+        async with _pool_lock:
+            if pool is None:
+                pool = await asyncpg.create_pool(
+                    DATABASE_URL,
+                    min_size=1,
+                    max_size=10,
+                    command_timeout=30,
+                )
+    return pool
 
+async def close_pool():
+    """Closes the process-local connection pool."""
+    global pool
+    if pool is not None:
+        await pool.close()
+        pool = None
 async def check_subgram(user_id: int, chat_id: int) -> dict:
     """
     Проверяет подписку пользователя через SubGram.

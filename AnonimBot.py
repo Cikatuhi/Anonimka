@@ -915,8 +915,13 @@ def main():
     import asyncio
     import database
     
-    asyncio.run(database.init_pool())
-    asyncio.run(database.init_db())
+    async def initialize_database():
+        try:
+            await database.init_db()
+        finally:
+            await database.close_pool()
+
+    asyncio.run(initialize_database())
 
     app = Application.builder().token(TOKEN).build()
 
