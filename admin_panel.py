@@ -1477,21 +1477,20 @@ async def payments_page(request: Request):
     try:
         conn = await database.get_conn()
         try:
-            # Общее количество платежей
-            total_payments = await conn.fetchval("SELECT COUNT(*) FROM payment_events")
-            
-            # Общая сумма платежей (в рублях)
-            total_amount = await conn.fetchval("SELECT COALESCE(SUM(amount), 0) FROM payment_events") / 100
-            
-            # Количество успешных платежей
-            successful_payments = await conn.fetchval(
-                "SELECT COUNT(*) FROM payment_events WHERE status = 'Completed'"
+            stats = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*) AS total_payments,
+                    COALESCE(SUM(amount), 0) AS total_amount,
+                    COUNT(*) FILTER (WHERE status = 'Completed') AS successful_payments,
+                    COUNT(*) FILTER (WHERE status != 'Completed') AS failed_payments
+                FROM payment_events
+                """
             )
-            
-            # Количество неудачных платежей
-            failed_payments = await conn.fetchval(
-                "SELECT COUNT(*) FROM payment_events WHERE status != 'Completed'"
-            )
+            total_payments = stats["total_payments"]
+            total_amount = stats["total_amount"] / 100
+            successful_payments = stats["successful_payments"]
+            failed_payments = stats["failed_payments"]
         finally:
             await database.release_conn(conn)
     except Exception as e:
