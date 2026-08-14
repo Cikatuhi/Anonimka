@@ -1,0 +1,19 @@
+[Unit]
+Description=CloudPayments Payment System
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Anonimno-Artem-
+EnvironmentFile=/root/Anonimno-Artem-/.env
+Environment="PATH=/root/Anonimno-Artem-/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/root/Anonimno-Artem-"
+Environment="PORT=8002"
+ExecStart=/root/Anonimno-Artem-/venv/bin/python3 /root/Anonimno-Artem-/main.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

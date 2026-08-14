@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/Anonimno-Artem-
-ExecStart=/usr/bin/python3 /root/Anonimno-Artem-/payment_site.py
+ExecStart=/root/Anonimno-Artem-/venv/bin/python3 /root/Anonimno-Artem-/payment_site.py
 Restart=always
 RestartSec=10
 
