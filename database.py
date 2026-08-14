@@ -3,6 +3,7 @@ import os
 import secrets
 from dotenv import load_dotenv
 import asyncio
+from contextlib import asynccontextmanager
 import aiohttp
 
 load_dotenv()
@@ -33,6 +34,14 @@ async def release_conn(conn):
     """Returns a connection to the pool."""
     if conn is not None and pool is not None:
         await pool.release(conn)
+@asynccontextmanager
+async def connection():
+    """Provides one pooled connection and always returns it."""
+    conn = await get_conn()
+    try:
+        yield conn
+    finally:
+        await release_conn(conn)
 # ============================================
 # ФУНКЦИИ ДЛЯ АДМИНКИ (отдельные соединения)
 # ============================================

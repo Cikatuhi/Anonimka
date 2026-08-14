@@ -1084,13 +1084,13 @@ async def get_broadcast_status(job_id: int):
 
 
 async def get_job_status(job_id: int):
-    async with database.pool.acquire() as conn:
+    async with database.connection() as conn:
         row = await conn.fetchrow("SELECT * FROM broadcast_jobs WHERE id = $1", job_id)
         return dict(row) if row else None
 
 @app.post("/broadcast/pause/{job_id}")
 async def pause_broadcast(job_id: int):
-    async with database.pool.acquire() as conn:
+    async with database.connection() as conn:
         job = await conn.fetchrow("SELECT * FROM broadcast_jobs WHERE id = $1", job_id)
         if not job:
             return JSONResponse(
@@ -1119,7 +1119,7 @@ async def pause_broadcast(job_id: int):
 
 @app.post("/broadcast/delete/{job_id}")
 async def delete_broadcast(job_id: int):
-    async with database.pool.acquire() as conn:
+    async with database.connection() as conn:
         job = await conn.fetchrow("SELECT * FROM broadcast_jobs WHERE id = $1", job_id)
         if not job:
             return JSONResponse(
