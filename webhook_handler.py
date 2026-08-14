@@ -33,7 +33,15 @@ def plan_from_amount(amount_rub) -> str | None:
 async def handle_webhook(request: Request):
     try:
         body = await request.json()
-        logger.info(f"Received webhook: {body}")
+        safe_model = body.get("Model") or {}
+        logger.info(
+            "Received webhook: event_type=%s transaction_id=%s account_id=%s status=%s is_recurrent=%s",
+            body.get("EventType"),
+            safe_model.get("TransactionId"),
+            safe_model.get("AccountId"),
+            safe_model.get("Status"),
+            safe_model.get("IsRecurrent", False),
+        )
 
         event_type = body.get("EventType")
         if event_type not in ["Payment", "Recurrent"]:
