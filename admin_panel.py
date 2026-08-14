@@ -393,9 +393,22 @@ async def dashboard(request: Request):
     try:
         conn = await database.get_conn()
         try:
-            total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
-            total_messages = await conn.fetchval("SELECT COUNT(*) FROM messages")
-            total_subscriptions = await database.count_active_subscriptions()
+            stats = await conn.fetchrow(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM users) AS total_users,
+                    (SELECT COUNT(*) FROM messages) AS total_messages,
+                    (
+                        SELECT COUNT(*)
+                        FROM subscriptions
+                        WHERE status = 'active'
+                          AND (end_date IS NULL OR end_date > NOW())
+                    ) AS total_subscriptions
+                """
+            )
+            total_users = stats["total_users"]
+            total_messages = stats["total_messages"]
+            total_subscriptions = stats["total_subscriptions"]
         finally:
             await database.release_conn(conn)
     except Exception as e:
