@@ -74,6 +74,69 @@ class CloudPaymentsClient:
         except Exception as e:
             logger.error(f"Error charging card: {e}")
             return {"success": False, "error": str(e)}
+
+    async def list_payments(
+        self,
+        payment_date: str,
+        page: int = 1,
+        count: int = 20,
+    ) -> Dict[str, Any]:
+        """Return CloudPayments transactions for one calendar date.
+
+        CloudPayments exposes both completed and declined operations through
+        ``/payments/list``.  The admin panel deliberately reads this data on
+        demand instead of treating the local webhook journal as the source of
+        truth for historical transactions.
+        """
+        url = f"{self.base_url}/payments/list"
+        payload = {
+            "Date": payment_date,
+            "TimeZone": "MSK",
+            "Page": page,
+            "Count": count,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers={
+                        "Authorization": f"Basic {self.auth}",
+                        "Content-Type": "application/json",
+                    },
+                )
+
+            if response.status_code != 200:
+                logger.error(
+                    "CloudPayments payments/list HTTP error: status=%s",
+                    response.status_code,
+                )
+                return {
+                    "success": False,
+                    "error": f"CloudPayments HTTP {response.status_code}",
+                }
+
+            data = response.json()
+            if not data.get("Success"):
+                return {
+                    "success": False,
+                    "error": data.get("Message") or "CloudPayments не вернул список транзакций",
+                }
+
+            model = data.get("Model") or []
+            if isinstance(model, dict):
+                model = model.get("Payments") or model.get("Items") or []
+
+            return {
+                "success": True,
+                "payments": model if isinstance(model, list) else [],
+                "page": page,
+                "count": count,
+            }
+        except Exception as e:
+            logger.error("Error loading CloudPayments transactions: %s", e)
+            return {"success": False, "error": str(e)}
     
     async def create_subscription(self,
                                   token: str,

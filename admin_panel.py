@@ -3,6 +3,7 @@ import uuid
 import psutil
 import re
 import aiohttp
+from html import escape
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Form
@@ -1719,56 +1720,101 @@ async def subgram_page(request: Request):
 
 @app.get("/payments", response_class=HTMLResponse)
 async def payments_page(request: Request):
-    
+    requested_date = request.query_params.get("date")
     try:
-        conn = await database.get_conn()
-        try:
-            stats = await conn.fetchrow(
-                """
-                SELECT
-                    COUNT(*) AS total_payments,
-                    COALESCE(SUM(amount), 0) AS total_amount,
-                    COUNT(*) FILTER (WHERE status = 'Completed') AS successful_payments,
-                    COUNT(*) FILTER (WHERE status != 'Completed') AS failed_payments
-                FROM payment_events
-                """
-            )
-            total_payments = stats["total_payments"]
-            total_amount = stats["total_amount"] / 100
-            successful_payments = stats["successful_payments"]
-            failed_payments = stats["failed_payments"]
-        finally:
-            await database.release_conn(conn)
+        payment_date = datetime.strptime(
+            requested_date, "%Y-%m-%d"
+        ).strftime("%Y-%m-%d") if requested_date else now_msk().strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        payment_date = now_msk().strftime("%Y-%m-%d")
+
+    try:
+        page = max(1, int(request.query_params.get("page", "1")))
+    except (TypeError, ValueError):
+        page = 1
+
+    page_size = 20
+    payments = []
+    api_error = None
+    try:
+        result = await CloudPaymentsClient().list_payments(
+            payment_date=payment_date,
+            page=page,
+            count=page_size,
+        )
+        if result.get("success"):
+            payments = result.get("payments", [])
+        else:
+            api_error = result.get("error") or "Не удалось получить операции"
     except Exception as e:
-        print(f"❌ Ошибка загрузки статистики платежей: {e}")
-        total_payments = 0
-        total_amount = 0
-        successful_payments = 0
-        failed_payments = 0
+        print(f"❌ Ошибка загрузки операций CloudPayments: {e}", flush=True)
+        api_error = "CloudPayments временно недоступен"
+
+    total_payments = len(payments)
+    total_amount = sum(float(item.get("Amount") or 0) for item in payments)
+    successful_payments = sum(1 for item in payments if item.get("Status") == "Completed")
+    failed_payments = total_payments - successful_payments
+    date_label = datetime.strptime(payment_date, "%Y-%m-%d").strftime("%d.%m.%Y")
 
     html = f'''
-    <div class="page-title">💳 Статистика CloudPayments</div>
-    
-    <div class="stats">
-        <div class="stat-card">
-            <div class="stat-number">{total_payments}</div>
-            <div class="stat-label">Всего платежей</div>
+    <div class="page-heading">
+        <div>
+            <h1>💳 Платежи CloudPayments</h1>
+            <p>Операции из CloudPayments за {date_label}. Показаны успешные и неуспешные транзакции.</p>
         </div>
-        <div class="stat-card">
-            <div class="stat-number">{total_amount:.2f} ₽</div>
-            <div class="stat-label">Общая сумма</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-number" style="color:#44ff88;">{successful_payments}</div>
-            <div class="stat-label">✅ Успешных</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-number" style="color:#ff4488;">{failed_payments}</div>
-            <div class="stat-label">❌ Неудачных</div>
+        <div class="page-actions">
+            <form method="get" action="/payments" style="display:flex;align-items:end;gap:8px;flex-wrap:wrap;">
+                <label style="margin:0;">Дата
+                    <input type="date" name="date" value="{payment_date}" style="display:block;margin-top:5px;width:auto;" />
+                </label>
+                <button type="submit">Обновить</button>
+            </form>
         </div>
     </div>
+
+    <div class="stats">
+        <div class="stat-card"><div class="stat-number">{total_payments}</div><div class="stat-label">Операций на странице</div></div>
+        <div class="stat-card"><div class="stat-number">{total_amount:.2f} ₽</div><div class="stat-label">Сумма на странице</div></div>
+        <div class="stat-card"><div class="stat-number" style="color:var(--success);">{successful_payments}</div><div class="stat-label">✅ Успешных</div></div>
+        <div class="stat-card"><div class="stat-number" style="color:var(--danger);">{failed_payments}</div><div class="stat-label">❌ Неуспешных</div></div>
+    </div>
     '''
-    
+
+    if api_error:
+        html += f'<div class="empty">⚠️ Не удалось получить операции CloudPayments: {escape(str(api_error))}</div>'
+    elif payments:
+        html += '''
+        <div class="table-container">
+            <table>
+                <tr><th>Пользователь</th><th>Сумма</th><th>Статус</th><th>Дата</th><th>TransactionId</th><th>Тип</th></tr>
+        '''
+        for payment in payments:
+            account_id = escape(str(payment.get("AccountId") or "—"))
+            transaction_id = escape(str(payment.get("TransactionId") or "—"))
+            status = str(payment.get("Status") or "Unknown")
+            status_text = "✅ Успешный" if status == "Completed" else f"❌ {status}"
+            status_class = "status-ok" if status == "Completed" else "status-down"
+            amount = float(payment.get("Amount") or 0)
+            created_at = payment.get("CreatedDateIso") or payment.get("CreatedDate") or "—"
+            created_at = escape(str(created_at).replace("T", " ")[:19])
+            payment_type = "Рекуррентный" if payment.get("IsRecurrent") else "Первичный"
+            html += f'''
+                <tr>
+                    <td><strong>{account_id}</strong></td>
+                    <td>{amount:.2f} ₽</td>
+                    <td><span class="status-pill {status_class}">{escape(status_text)}</span></td>
+                    <td>{created_at}</td>
+                    <td>{transaction_id}</td>
+                    <td>{payment_type}</td>
+                </tr>
+            '''
+        html += '</table></div>'
+        previous = f'<a class="button button-secondary" href="/payments?date={payment_date}&page={page - 1}">← Предыдущая</a>' if page > 1 else ''
+        next_page = f'<a class="button button-secondary" href="/payments?date={payment_date}&page={page + 1}">Следующая →</a>' if len(payments) == page_size else ''
+        html += f'<div class="page-actions" style="justify-content:space-between;margin-top:16px;"><span class="panel-copy">Страница {page}</span><div style="display:flex;gap:8px;">{previous}{next_page}</div></div>'
+    else:
+        html += '<div class="empty">За выбранную дату операций CloudPayments нет.</div>'
+
     menu = MENU.replace('💳 Платежи', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">💳 Платежи</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
