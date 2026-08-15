@@ -44,102 +44,47 @@ app.add_middleware(
 
 LOGIN_PAGE = '''
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Вход в админ-панель</title>
     <style>
+        :root { --ink: #183332; --muted: #71817f; --line: #dce7e4; --accent: #118b7e; --accent-dark: #0d7168; --canvas: #f2f6f5; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', Arial, sans-serif; 
-            background: #0a0a1a; 
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            padding: 20px;
-        }
+        body { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--canvas); color: var(--ink); display: grid; place-items: center; min-height: 100vh; padding: 24px; }
+        body::before { content: ""; position: fixed; inset: 0; pointer-events: none; background: radial-gradient(circle at 18% 12%, rgba(17,139,126,.10), transparent 32%), radial-gradient(circle at 84% 82%, rgba(44,109,105,.08), transparent 28%); }
         .login-box {
-            background: #111128;
-            border-radius: 16px;
-            padding: 40px;
-            max-width: 400px;
-            width: 100%;
-            border: 1px solid #7c3aed33;
-            box-shadow: 0 0 40px #7c3aed11;
+            position: relative; z-index: 1; background: rgba(255,255,255,.96); border-radius: 22px; padding: 38px; max-width: 430px; width: 100%; border: 1px solid rgba(24,51,50,.09); box-shadow: 0 24px 70px rgba(26,63,60,.12);
         }
-        .login-box h1 {
-            color: #7c3aed;
-            font-size: 28px;
-            text-align: center;
-            margin-bottom: 8px;
-        }
-        .login-box .subtitle {
-            color: #8899aa;
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 14px;
-        }
-        .login-box label {
-            display: block;
-            color: #8899aa;
-            margin-bottom: 6px;
-            font-weight: 500;
-            font-size: 14px;
-        }
+        .brand-mark { width: 48px; height: 48px; margin: 0 auto 20px; display: grid; place-items: center; border-radius: 14px; color: white; background: var(--accent); font-size: 22px; font-weight: 800; box-shadow: 0 10px 24px rgba(17,139,126,.22); }
+        .login-box h1 { color: var(--ink); font-size: 27px; text-align: center; margin-bottom: 8px; letter-spacing: -.02em; }
+        .login-box .subtitle { color: var(--muted); text-align: center; margin-bottom: 30px; font-size: 14px; line-height: 1.5; }
+        .login-box label { display: block; color: #435b59; margin-bottom: 7px; font-weight: 650; font-size: 13px; }
         .login-box input[type="text"],
         .login-box input[type="password"] {
-            width: 100%;
-            padding: 12px 16px;
-            border-radius: 10px;
-            border: 1px solid #7c3aed33;
-            background: #0a0a1a;
-            color: #cdd6f4;
-            font-size: 16px;
-            transition: all 0.3s ease;
-            margin-bottom: 16px;
+            width: 100%; padding: 12px 14px; border-radius: 11px; border: 1px solid var(--line); background: #fbfdfc; color: var(--ink); font-size: 15px; transition: .2s ease; margin-bottom: 17px;
         }
-        .login-box input:focus {
-            outline: none;
-            border-color: #7c3aed;
-            box-shadow: 0 0 20px #7c3aed22;
-        }
+        .login-box input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(17,139,126,.10); background: white; }
         .login-box button {
-            width: 100%;
-            padding: 14px;
-            background: #7c3aed;
-            color: #0a0a1a;
-            border: none;
-            border-radius: 10px;
-            font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
+            width: 100%; padding: 13px; background: var(--accent); color: white; border: none; border-radius: 11px; font-size: 15px; font-weight: 750; cursor: pointer; transition: .2s ease;
         }
-        .login-box button:hover {
-            background: #00ddbb;
-            box-shadow: 0 0 30px #7c3aed44;
-            transform: translateY(-2px);
-        }
-        .login-box .error {
-            color: #ff4488;
-            text-align: center;
-            margin-top: 12px;
-            font-size: 14px;
-        }
+        .login-box button:hover { background: var(--accent-dark); transform: translateY(-1px); box-shadow: 0 10px 24px rgba(17,139,126,.18); }
+        .login-box .error { color: #b54747; text-align: center; margin-top: 14px; font-size: 13px; }
+        @media (max-width: 480px) { .login-box { padding: 30px 22px; } }
     </style>
 </head>
 <body>
     <div class="login-box">
-        <h1>🔐 Вход</h1>
-        <p class="subtitle">Введите ник и пароль</p>
+        <div class="brand-mark">A</div>
+        <h1>Панель управления</h1>
+        <p class="subtitle">Войдите, чтобы управлять ботом и отслеживать ключевые показатели.</p>
         <form action="/admin/login" method="post">
-            <label>Ник</label>
-            <input type="text" name="username" placeholder="Введите ник" required>
-            <label>Пароль</label>
-            <input type="password" name="password" placeholder="Введите пароль" required>
-            <button type="submit">🚀 Войти</button>
+            <label for="username">Логин</label>
+            <input id="username" type="text" name="username" placeholder="Введите логин" autocomplete="username" required>
+            <label for="password">Пароль</label>
+            <input id="password" type="password" name="password" placeholder="Введите пароль" autocomplete="current-password" required>
+            <button type="submit">Войти</button>
         </form>
         <div id="error" class="error"></div>
     </div>
@@ -148,149 +93,206 @@ LOGIN_PAGE = '''
 '''
 
 MENU = '''
-<div style="background: #0a0a1a; padding: 10px 15px; border: 1px solid #7c3aed33; border-radius: 12px 12px 0 0; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; box-shadow: 0 0 30px #7c3aed11;">
-    <a href="/" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
-       onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">📊 Дашборд</a>
-    <a href="/users" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
-       onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">👥 Пользователи</a>
-    <a href="/messages" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
-       onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">💬 Сообщения</a>
-    <a href="/subscriptions" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
-       onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">📋 Подписки</a>
-    <a href="/withdrawals" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
-       onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">💰 Снятия</a>
-    <a href="/blocked" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
-       onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">🚫 ЧС</a>
-    <a href="/unsubscribed" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
-       onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">🚫 Отписались</a>
-    <a href="/monitoring" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
-       onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">📊 Мониторинг</a>
-    <a href="/settings" style="color: #88f0e0; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid transparent; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
-       onmouseout="this.style.border='1px solid transparent'; this.style.boxShadow='none'; this.style.background='transparent';">⚙️ Настройки</a>
-    <a href="/broadcast" style="color: #7c3aed; text-decoration: none; font-weight: 600; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #7c3aed44; transition: all 0.3s ease; text-shadow: 0 0 20px #7c3aed44; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 30px #7c3aed55'; this.style.background='#7c3aed22';" 
-       onmouseout="this.style.border='1px solid #7c3aed44'; this.style.boxShadow='none'; this.style.background='transparent';">📢 Рассылка</a>
-    <a href="/webhooks" style="color: #ffaa44; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #ffaa4444; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #ffaa44'; this.style.boxShadow='0 0 20px #ffaa4455'; this.style.background='#ffaa4422';" 
-       onmouseout="this.style.border='1px solid #ffaa4444'; this.style.boxShadow='none'; this.style.background='transparent';">📨 Вебхуки</a>
-    <a href="/subgram" style="color: #ffaa44; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #ffaa4444; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #ffaa44'; this.style.boxShadow='0 0 20px #ffaa4455'; this.style.background='#ffaa4422';" 
-       onmouseout="this.style.border='1px solid #ffaa4444'; this.style.boxShadow='none'; this.style.background='transparent';">📊 SubGram</a>  
-    <a href="/payments" style="color: #7c3aed; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #7c3aed44; transition: all 0.3s ease; white-space: nowrap;" 
-       onmouseover="this.style.border='1px solid #7c3aed'; this.style.boxShadow='0 0 20px #7c3aed55'; this.style.background='#7c3aed22';" 
-       onmouseout="this.style.border='1px solid #7c3aed44'; this.style.boxShadow='none'; this.style.background='transparent';">💳 Платежи</a>    
-    <a href="/admin/logout" style="color: #ff4488; text-decoration: none; font-weight: 500; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid #ff448844; transition: all 0.3s ease; white-space: nowrap; margin-left: auto;" 
-       onmouseover="this.style.border='1px solid #ff4488'; this.style.boxShadow='0 0 20px #ff448855'; this.style.background='#ff448822';" 
-       onmouseout="this.style.border='1px solid #ff448844'; this.style.boxShadow='none'; this.style.background='transparent';">🚪 Выйти</a>
+<div class="sidebar-brand">
+    <div class="brand-symbol">A</div>
+    <div><strong>Anonimno</strong><span>Панель управления</span></div>
+</div>
+<nav class="sidebar-nav" aria-label="Основная навигация">
+    <div class="nav-section">
+        <div class="nav-section-title">Основное</div>
+        <a class="nav-link" data-nav href="/"><span class="nav-icon">⌂</span><span>Обзор</span></a>
+        <a class="nav-link" data-nav href="/users"><span class="nav-icon">◎</span><span>Пользователи</span></a>
+        <a class="nav-link" data-nav href="/messages"><span class="nav-icon">≋</span><span>Сообщения</span></a>
+    </div>
+    <div class="nav-section">
+        <div class="nav-section-title">Монетизация</div>
+        <a class="nav-link" data-nav href="/subscriptions"><span class="nav-icon">◇</span><span>Подписки</span></a>
+        <a class="nav-link" data-nav href="/payments"><span class="nav-icon">₽</span><span>Платежи</span></a>
+        <a class="nav-link" data-nav href="/withdrawals"><span class="nav-icon">↗</span><span>Снятия</span></a>
+        <a class="nav-link" data-nav href="/subgram"><span class="nav-icon">◉</span><span>SubGram</span></a>
+    </div>
+    <div class="nav-section">
+        <div class="nav-section-title">Коммуникации</div>
+        <a class="nav-link" data-nav href="/broadcast"><span class="nav-icon">✦</span><span>Рассылки</span></a>
+        <a class="nav-link" data-nav href="/blocked"><span class="nav-icon">⊘</span><span>Чёрный список</span></a>
+        <a class="nav-link" data-nav href="/unsubscribed"><span class="nav-icon">○</span><span>Отписавшиеся</span></a>
+    </div>
+    <div class="nav-section">
+        <div class="nav-section-title">Система</div>
+        <a class="nav-link" data-nav href="/monitoring"><span class="nav-icon">⌁</span><span>Мониторинг</span></a>
+        <a class="nav-link" data-nav href="/webhooks"><span class="nav-icon">⇄</span><span>Вебхуки</span></a>
+        <a class="nav-link" data-nav href="/settings"><span class="nav-icon">⚙</span><span>Настройки</span></a>
+    </div>
+</nav>
+<div class="sidebar-footer">
+    <a class="nav-link logout-link" href="/admin/logout"><span class="nav-icon">↪</span><span>Выйти</span></a>
 </div>
 '''
 
 BASE_HTML = '''
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>Админ панель</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anonimno — панель управления</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Arial, sans-serif; background: #0a0a1a; color: #cdd6f4; }
-        .container { max-width: 1400px; margin: 0 auto; padding: 10px 15px; }
-        .menu { background: #0a0a1a; border-radius: 12px; margin-bottom: 20px; border: 1px solid #7c3aed33; box-shadow: 0 0 30px #7c3aed11; overflow-x: auto; }
-        .menu a { display: inline-block; padding: 10px 12px; color: #a6adc8; text-decoration: none; font-weight: 500; font-size: 13px; border-bottom: 3px solid transparent; transition: all 0.2s; white-space: nowrap; }
-        .menu a:hover { color: #cdd6f4; border-bottom-color: #89b4fa; }
-        .menu a.active { color: #cdd6f4; border-bottom-color: #89b4fa; font-weight: 600; }
-        .page-title { font-size: 20px; font-weight: 700; margin-bottom: 15px; color: #cdd6f4; text-shadow: 0 0 40px #7c3aed11; }
-        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
-        .stat-card { background: #111128; padding: 15px 12px; border-radius: 12px; text-align: center; transition: all 0.3s ease; border: 1px solid #7c3aed22; }
-        .stat-card:hover { transform: translateY(-4px); border: 1px solid #7c3aed; box-shadow: 0 0 30px #7c3aed33; background: #7c3aed11; }
-        .stat-number { font-size: 28px; font-weight: 700; color: #7c3aed; text-shadow: 0 0 40px #7c3aed44; }
-        .stat-label { font-size: 12px; color: #8899aa; margin-top: 4px; }
-        .stat-card .icon { font-size: 24px; margin-bottom: 5px; display: block; }
-        .table-container { background: #111128; border-radius: 12px; overflow-x: auto; border: 1px solid #7c3aed22; transition: all 0.3s ease; }
-        .table-container:hover { border: 1px solid #7c3aed44; box-shadow: 0 0 30px #7c3aed11; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th { background: #0a0a1a; color: #7c3aed; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; padding: 10px 8px; text-align: left; border-bottom: 1px solid #7c3aed22; }
-        td { padding: 8px 8px; border-bottom: 1px solid #1a1a3a; font-size: 13px; color: #cdd6f4; word-break: break-word; }
-        tr:hover td { background: #7c3aed11; }
-        .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; border: 1px solid transparent; white-space: nowrap; }
-        .badge-text { background: #7c3aed22; color: #7c3aed; border-color: #7c3aed44; }
-        .badge-photo { background: #4488ff22; color: #4488ff; border-color: #4488ff44; }
-        .badge-video { background: #ff448822; color: #ff4488; border-color: #ff448844; }
-        .badge-voice { background: #ffaa4422; color: #ffaa44; border-color: #ffaa4444; }
-        .badge-sticker { background: #aa44ff22; color: #aa44ff; border-color: #aa44ff44; }
-        .badge-video_note { background: #ff664422; color: #ff6644; border-color: #ff664444; }
-        .form-container { background: #111128; padding: 20px; border-radius: 12px; border: 1px solid #7c3aed22; }
-        .form-container:hover { border: 1px solid #7c3aed44; box-shadow: 0 0 30px #7c3aed11; }
-        label { display: block; margin-bottom: 6px; color: #8899aa; font-weight: 500; font-size: 14px; }
-        textarea, input[type="text"] {
-            width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #7c3aed33; background: #0a0a1a; color: #cdd6f4; font-size: 14px; font-family: 'Segoe UI', Arial, sans-serif; transition: all 0.3s ease;
+        :root {
+            --canvas: #f3f7f6; --surface: #ffffff; --surface-soft: #f8fbfa; --ink: #183332; --muted: #738380;
+            --line: #dce7e4; --accent: #118b7e; --accent-dark: #0d7168; --accent-soft: #e8f5f2;
+            --danger: #c34f55; --warning: #bb792d; --success: #2f8b66; --sidebar-width: 264px;
         }
-        textarea:focus, input[type="text"]:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 30px #7c3aed22; }
-        button { padding: 10px 20px; border: 1px solid #7c3aed; border-radius: 8px; background: transparent; color: #7c3aed; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s ease; width: 100%; }
-        button:hover { background: #7c3aed22; box-shadow: 0 0 30px #7c3aed55; transform: translateY(-2px); }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { background: var(--canvas); }
+        body { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--canvas); color: var(--ink); line-height: 1.45; }
+        a { color: var(--accent); }
+        .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 40; width: var(--sidebar-width); display: flex; flex-direction: column; background: #fbfdfc; border-right: 1px solid var(--line); }
+        .sidebar-brand { height: 76px; display: flex; align-items: center; gap: 12px; padding: 0 22px; border-bottom: 1px solid var(--line); }
+        .brand-symbol { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; color: white; background: var(--accent); font-weight: 800; box-shadow: 0 8px 18px rgba(17,139,126,.18); }
+        .sidebar-brand strong { display: block; font-size: 15px; letter-spacing: -.01em; }
+        .sidebar-brand span { display: block; color: var(--muted); font-size: 11px; margin-top: 1px; }
+        .sidebar-nav { flex: 1; overflow-y: auto; padding: 18px 14px; }
+        .nav-section + .nav-section { margin-top: 19px; }
+        .nav-section-title { padding: 0 11px 7px; color: #94a19f; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .11em; }
+        .nav-link { display: flex; align-items: center; gap: 11px; min-height: 40px; padding: 8px 11px; border-radius: 10px; color: #526765; text-decoration: none; font-size: 13px; font-weight: 620; transition: .16s ease; }
+        .nav-link span { color: inherit !important; text-shadow: none !important; }
+        .nav-link:hover { color: var(--ink); background: #f0f5f3; }
+        .nav-link.active { color: var(--accent-dark); background: var(--accent-soft); }
+        .nav-icon { width: 22px; text-align: center; font-size: 16px; font-weight: 500; }
+        .sidebar-footer { padding: 14px; border-top: 1px solid var(--line); }
+        .logout-link { color: #9b4b4f; }
+        .main-shell { min-height: 100vh; margin-left: var(--sidebar-width); }
+        .topbar { position: sticky; top: 0; z-index: 30; height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 32px; background: rgba(243,247,246,.88); border-bottom: 1px solid rgba(220,231,228,.9); backdrop-filter: blur(14px); }
+        .topbar-context { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+        .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #3ba77b; box-shadow: 0 0 0 4px rgba(59,167,123,.12); }
+        .mobile-menu-button { display: none; width: 40px; height: 40px; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: white; color: var(--ink); }
+        .sidebar-overlay { display: none; position: fixed; inset: 0; z-index: 35; background: rgba(10,35,33,.32); }
+        .container { max-width: 1480px; margin: 0 auto; padding: 30px 32px 48px; }
+        .page-title { font-size: 25px; font-weight: 760; margin-bottom: 22px; color: var(--ink); letter-spacing: -.025em; }
+        .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+        .page-heading h1 { font-size: 27px; line-height: 1.2; letter-spacing: -.03em; }
+        .page-heading p { color: var(--muted); font-size: 13px; margin-top: 7px; }
+        .page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 22px; }
+        .stat-card { min-height: 128px; background: var(--surface); padding: 19px; border-radius: 15px; text-align: left; border: 1px solid var(--line); box-shadow: 0 7px 24px rgba(34,72,68,.035); }
+        .stat-card:hover { border-color: #c7dad5; box-shadow: 0 10px 28px rgba(34,72,68,.06); }
+        .stat-number { font-size: 29px; line-height: 1.1; font-weight: 770; color: var(--ink); letter-spacing: -.025em; }
+        .stat-label { font-size: 12px; color: var(--muted); margin-top: 8px; }
+        .stat-card .icon { width: 30px; height: 30px; margin-bottom: 17px; display: grid; place-items: center; border-radius: 9px; background: var(--accent-soft); color: var(--accent-dark); font-size: 14px; }
+        .quick-grid { display: grid; grid-template-columns: 1.35fr .65fr; gap: 14px; }
+        .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 15px; padding: 22px; box-shadow: 0 7px 24px rgba(34,72,68,.035); }
+        .panel-title { font-size: 15px; font-weight: 740; margin-bottom: 6px; }
+        .panel-copy { color: var(--muted); font-size: 13px; }
+        .quick-links { display: grid; gap: 8px; margin-top: 18px; }
+        .quick-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 13px; color: var(--ink); text-decoration: none; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 11px; font-size: 13px; font-weight: 650; }
+        .quick-link:hover { border-color: #bcd4cf; background: var(--accent-soft); }
+        .table-container { background: var(--surface); border-radius: 15px; overflow-x: auto; border: 1px solid var(--line); box-shadow: 0 7px 24px rgba(34,72,68,.035); }
+        table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 13px; }
+        th { background: #f8fbfa; color: #71817f; font-weight: 750; font-size: 10px; text-transform: uppercase; letter-spacing: .07em; padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--line); }
+        td { padding: 12px 14px; border-bottom: 1px solid #edf2f0; font-size: 13px; color: #324947; word-break: break-word; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #fbfdfc; }
+        .badge { display: inline-block; padding: 4px 9px; border-radius: 999px; font-size: 10px; font-weight: 750; border: 1px solid transparent; white-space: nowrap; }
+        .badge-text { background: var(--accent-soft); color: var(--accent-dark); border-color: #cfe6e1; }
+        .badge-photo, .badge-video, .badge-voice, .badge-sticker, .badge-video_note { background: #f1f4f3; color: #5d706d; border-color: var(--line); }
+        .form-container { background: var(--surface); padding: 22px; border-radius: 15px; border: 1px solid var(--line); box-shadow: 0 7px 24px rgba(34,72,68,.035); }
+        label { display: block; margin-bottom: 7px; color: #465e5b; font-weight: 680; font-size: 13px; }
+        textarea, input[type="text"] {
+            width: 100%; padding: 11px 13px; border-radius: 11px; border: 1px solid var(--line); background: #fbfdfc; color: var(--ink); font-size: 14px; font-family: inherit; transition: .18s ease;
+        }
+        textarea { min-height: 132px; resize: vertical; line-height: 1.55; }
+        textarea:focus, input[type="text"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(17,139,126,.09); background: white; }
+        button, .button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 39px; padding: 9px 15px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent); color: white; text-decoration: none; font-weight: 700; font-size: 13px; cursor: pointer; transition: .17s ease; width: auto; }
+        button:hover, .button:hover { background: var(--accent-dark); border-color: var(--accent-dark); transform: translateY(-1px); }
+        button:disabled { opacity: .55; cursor: wait; transform: none; }
+        .button-secondary { color: #455d5a; background: white; border-color: var(--line); }
+        .button-secondary:hover { color: var(--ink); background: #f7faf9; border-color: #bdcfcb; }
+        .button-danger { color: var(--danger); background: #fff; border-color: #e9c9cb; }
+        .button-danger:hover { color: #a23f44; background: #fff5f5; border-color: #dbaeb1; }
+        .button-warning { color: var(--warning); background: #fffaf3; border-color: #ead6b9; }
+        .button-warning:hover { color: #966020; background: #fff5e8; border-color: #dbbd92; }
         .mt-20 { margin-top: 15px; }
         .mb-20 { margin-bottom: 15px; }
-        .empty { text-align: center; padding: 30px 15px; color: #8899aa; font-size: 14px; }
-        .result-box { background: #111128; padding: 20px; border-radius: 12px; border: 1px solid #7c3aed44; }
-        .result-box h2 { font-size: 18px; margin-bottom: 15px; }
+        .empty { text-align: center; padding: 46px 18px; color: var(--muted); font-size: 13px; background: var(--surface); border: 1px dashed #cddbd8; border-radius: 15px; }
+        .result-box { background: var(--surface); padding: 22px; border-radius: 15px; border: 1px solid var(--line) !important; box-shadow: 0 7px 24px rgba(34,72,68,.035); }
+        .result-box h2 { color: var(--ink) !important; font-size: 16px; margin-bottom: 18px; }
         .result-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 15px; }
-        .result-stats div { text-align: center; }
-        .result-stats .number { font-size: 28px; font-weight: 700; color: #7c3aed; }
-        .result-stats .label { color: #8899aa; font-size: 12px; }
-        .result-message { background: #0a0a1a; padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #7c3aed22; word-break: break-word; font-size: 14px; }
-        .glow-button { display: inline-block; padding: 10px 20px; border: 1px solid #7c3aed; border-radius: 8px; color: #7c3aed; text-decoration: none; transition: all 0.3s ease; text-align: center; width: 100%; }
-        .glow-button:hover { background: #7c3aed22; box-shadow: 0 0 30px #7c3aed55; }
-        .progress-bar { width: 100%; height: 20px; background: #1a1a3a; border-radius: 10px; overflow: hidden; margin: 10px 0; border: 1px solid #7c3aed33; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #00ff88); transition: width 0.5s ease; border-radius: 10px; width: 0%; }
-        .status-running { color: #7c3aed; }
-        .status-paused { color: #ffaa44; }
-        .status-completed { color: #44ff88; }
-        .status-pending { color: #8899aa; }
-        .status-failed { color: #ff4488; }
-        .status-cancelled { color: #ff6644; }
+        .result-stats > div { padding: 13px; text-align: left; background: var(--surface-soft); border: 1px solid #e8efed; border-radius: 11px; }
+        .result-stats .number { font-size: 24px; font-weight: 760; color: var(--ink) !important; }
+        .result-stats .label { color: var(--muted); font-size: 10px; margin-top: 5px; }
+        .result-message { background: var(--surface-soft); padding: 12px; border-radius: 10px; margin-bottom: 15px; border: 1px solid var(--line); word-break: break-word; font-size: 13px; }
+        .glow-button { display: inline-flex; align-items: center; justify-content: center; padding: 9px 15px; min-height: 39px; border: 1px solid var(--line) !important; border-radius: 10px; color: #455d5a !important; background: white; text-decoration: none; transition: .17s ease; text-align: center; font-size: 13px; font-weight: 700; width: auto; }
+        .glow-button:hover { color: var(--ink) !important; background: #f7faf9; border-color: #bdcfcb !important; transform: translateY(-1px); }
+        .progress-bar { width: 100%; height: 9px; background: #e8efed; border-radius: 999px; overflow: hidden; margin: 14px 0 9px; }
+        .progress-fill { height: 100%; background: var(--accent); transition: width .5s ease; border-radius: 999px; width: 0%; }
+        .progress-text { color: var(--muted) !important; }
+        .status-running { color: var(--accent); }
+        .status-paused { color: var(--warning); }
+        .status-completed { color: var(--success); }
+        .status-pending { color: var(--muted); }
+        .status-failed, .status-cancelled { color: var(--danger); }
         .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; }
-        .detail-item { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #1a1a3a; }
-        .detail-item .label { color: #8899aa; }
-        .detail-item .value { color: #cdd6f4; font-weight: 500; }
+        .detail-item { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #edf2f0; }
+        .detail-item .label { color: var(--muted); }
+        .detail-item .value { color: var(--ink); font-weight: 650; }
         .updating { opacity: 0.5; transition: opacity 0.3s; }
-        @media (max-width: 600px) {
-            .container { padding: 8px 10px; }
-            .menu a { font-size: 11px; padding: 6px 8px; }
-            .stats { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-            .stat-card { padding: 10px 8px; }
-            .stat-number { font-size: 20px; }
-            .stat-label { font-size: 10px; }
-            .stat-card .icon { font-size: 18px; }
-            .page-title { font-size: 17px; }
-            table { font-size: 11px; }
-            th, td { padding: 5px 5px; }
-            .badge { font-size: 9px; padding: 2px 6px; }
-            button { font-size: 13px; padding: 12px; }
-            .result-stats { grid-template-columns: repeat(2, 1fr); }
-            .form-container { padding: 15px; }
-            textarea { font-size: 13px; }
-            .detail-grid { grid-template-columns: 1fr; }
+        @media (max-width: 980px) {
+            .sidebar { transform: translateX(-102%); transition: transform .22s ease; box-shadow: 16px 0 40px rgba(20,55,52,.13); }
+            body.sidebar-open .sidebar { transform: translateX(0); }
+            body.sidebar-open .sidebar-overlay { display: block; }
+            .main-shell { margin-left: 0; }
+            .mobile-menu-button { display: inline-flex; align-items: center; justify-content: center; }
+            .topbar { height: 68px; padding: 0 20px; }
+            .container { padding: 24px 20px 42px; }
         }
-        @media (max-width: 400px) {
-            .stats { grid-template-columns: 1fr 1fr; gap: 6px; }
-            .menu a { font-size: 10px; padding: 4px 6px; }
+        @media (max-width: 700px) {
+            .page-heading { flex-direction: column; }
+            .page-heading h1, .page-title { font-size: 22px; }
+            .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+            .stat-card { min-height: 110px; padding: 15px; }
+            .stat-number { font-size: 24px; }
+            .stat-card .icon { margin-bottom: 12px; }
+            .quick-grid { grid-template-columns: 1fr; }
+            .result-stats { grid-template-columns: repeat(2, 1fr); }
+            .form-container, .result-box, .panel { padding: 17px; }
+            .detail-grid { grid-template-columns: 1fr; }
+            .topbar-context span:last-child { display: none; }
+        }
+        @media (max-width: 430px) {
+            .container { padding: 20px 14px 36px; }
+            .stats { grid-template-columns: 1fr; }
+            .stat-card { min-height: 96px; }
+            .page-actions, .page-actions .button, .page-actions .glow-button { width: 100%; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="menu">MENU_PLACEHOLDER</div>
-        <div id="content">CONTENT_PLACEHOLDER</div>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+    <aside class="sidebar" id="sidebar">MENU_PLACEHOLDER</aside>
+    <main class="main-shell">
+        <header class="topbar">
+            <button class="mobile-menu-button" id="mobile-menu-button" type="button" aria-label="Открыть меню">☰</button>
+            <div class="topbar-context"><span class="live-dot"></span><span>Система работает</span></div>
+        </header>
+        <div class="container"><div id="content">CONTENT_PLACEHOLDER</div></div>
+    </main>
+    <script>
+        (() => {
+            const path = window.location.pathname;
+            document.querySelectorAll('[data-nav]').forEach((link) => {
+                const target = link.getAttribute('href');
+                const active = target === '/' ? path === '/' : path === target || path.startsWith(target + '/');
+                link.classList.toggle('active', active);
+                if (active) link.setAttribute('aria-current', 'page');
+            });
+            const openButton = document.getElementById('mobile-menu-button');
+            const overlay = document.getElementById('sidebar-overlay');
+            const closeSidebar = () => document.body.classList.remove('sidebar-open');
+            openButton?.addEventListener('click', () => document.body.classList.toggle('sidebar-open'));
+            overlay?.addEventListener('click', closeSidebar);
+            document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeSidebar(); });
+        })();
+    </script>
     </div>
 </body>
 </html>
@@ -417,11 +419,37 @@ async def dashboard(request: Request):
         traceback.print_exc()
 
     content = f'''
-    <div class="page-title">📊 Дашборд</div>
+    <div class="page-heading">
+        <div>
+            <h1>Обзор</h1>
+            <p>Ключевые показатели бота и быстрый доступ к ежедневным действиям.</p>
+        </div>
+        <div class="page-actions">
+            <a class="button" href="/broadcast">Создать рассылку</a>
+        </div>
+    </div>
     <div class="stats">
-        <div class="stat-card"><span class="icon">👥</span><div class="stat-number">{total_users}</div><div class="stat-label">Пользователи</div></div>
-        <div class="stat-card"><span class="icon">📋</span><div class="stat-number">{total_subscriptions}</div><div class="stat-label">Подписки</div></div>
-        <div class="stat-card"><span class="icon">💬</span><div class="stat-number">{total_messages}</div><div class="stat-label">Всего сообщений</div></div>
+        <div class="stat-card"><span class="icon">◎</span><div class="stat-number">{total_users}</div><div class="stat-label">Всего пользователей</div></div>
+        <div class="stat-card"><span class="icon">◇</span><div class="stat-number">{total_subscriptions}</div><div class="stat-label">Активные подписки</div></div>
+        <div class="stat-card"><span class="icon">≋</span><div class="stat-number">{total_messages}</div><div class="stat-label">Сообщений отправлено</div></div>
+    </div>
+    <div class="quick-grid">
+        <section class="panel">
+            <div class="panel-title">Быстрые действия</div>
+            <p class="panel-copy">Самые частые операции собраны в одном месте.</p>
+            <div class="quick-links">
+                <a class="quick-link" href="/broadcast"><span>Запустить новую рассылку</span><span>→</span></a>
+                <a class="quick-link" href="/subscriptions"><span>Проверить подписки</span><span>→</span></a>
+                <a class="quick-link" href="/payments"><span>Открыть платежную статистику</span><span>→</span></a>
+            </div>
+        </section>
+        <section class="panel">
+            <div class="panel-title">Состояние системы</div>
+            <p class="panel-copy">Метрики нагрузки и доступности сервера.</p>
+            <div class="quick-links">
+                <a class="quick-link" href="/monitoring"><span>Открыть мониторинг</span><span>→</span></a>
+            </div>
+        </section>
     </div>
     '''
     
@@ -895,38 +923,34 @@ async def broadcast_page(request: Request):
         status_class = f"status-{status_text}"
         
         result_html = f'''
-        <div class="result-box" style="border-color: #7c3aed44; margin-top: 20px;" id="broadcast-stats">
-            <h2 style="color: #7c3aed;">📊 Статистика рассылки #{job_id} - <span class="status-value {status_class}">{status_label}</span></h2>
+        <div class="result-box" id="broadcast-stats">
+            <div class="page-heading" style="margin-bottom:18px;">
+                <div>
+                    <h2>Рассылка #{job_id} · <span class="status-value {status_class}">{status_label}</span></h2>
+                    <p>Статус автоматически обновляется каждые 5 секунд.</p>
+                </div>
+            </div>
             <div class="result-stats">
-                <div class="stat-total"><div class="number">{total}</div><div class="label">Всего пользователей</div></div>
-                <div class="stat-sent"><div class="number" style="color: #7c3aed;">{sent}</div><div class="label">✅ Успешно отправлено</div></div>
-                <div class="stat-failed"><div class="number" style="color: #ff4488;">{failed}</div><div class="label">❌ Ошибок</div></div>
-                <div class="stat-remaining"><div class="number" style="color: #ffaa44;">{remaining}</div><div class="label">⏳ Осталось</div></div>
+                <div class="stat-total"><div class="number">{total}</div><div class="label">Получателей</div></div>
+                <div class="stat-sent"><div class="number">{sent}</div><div class="label">Отправлено</div></div>
+                <div class="stat-failed"><div class="number">{failed}</div><div class="label">Ошибок</div></div>
+                <div class="stat-remaining"><div class="number">{remaining}</div><div class="label">Осталось</div></div>
             </div>
             <div class="progress-bar">
                 <div class="progress-fill" style="width:{min(progress, 100)}%;"></div>
             </div>
-            <p class="progress-text" style="text-align:center; color:#8899aa; font-size:13px;">{progress:.1f}% - Обработано: {processed} из {total}</p>
+            <p class="progress-text" style="font-size:12px;">{progress:.1f}% · Обработано {processed} из {total}</p>
             
-            <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
-                <button onclick="pauseBroadcast()" id="pauseBtn" 
-                        style="display: {'block' if status_text in ('running', 'pending') else 'none'}; flex:1; padding: 12px 20px; border: 2px solid #ffaa44; border-radius: 8px; 
-                               background: transparent; color: #ffaa44; font-weight: 600; font-size: 14px; 
-                               cursor: pointer; transition: all 0.3s ease;"
-                        onmouseover="this.style.background='#ffaa4422'; this.style.boxShadow='0 0 30px #ffaa4455';"
-                        onmouseout="this.style.background='transparent'; this.style.boxShadow='none';">
-                    ⏸️ Поставить на паузу
+            <div class="page-actions" style="margin-top:18px;">
+                <button onclick="pauseBroadcast()" id="pauseBtn" class="button-warning"
+                        style="display: {'inline-flex' if status_text in ('running', 'pending') else 'none'};">
+                    Поставить на паузу
                 </button>
-                <button onclick="deleteBroadcast()" id="deleteBtn" 
-                        style="flex:1; padding: 12px 20px; border: 2px solid #ff4488; border-radius: 8px; 
-                               background: transparent; color: #ff4488; font-weight: 600; font-size: 14px; 
-                               cursor: pointer; transition: all 0.3s ease;"
-                        onmouseover="this.style.background='#ff448822'; this.style.boxShadow='0 0 30px #ff448855';"
-                        onmouseout="this.style.background='transparent'; this.style.boxShadow='none';">
-                    🗑️ Удалить рассылку
+                <button onclick="deleteBroadcast()" id="deleteBtn" class="button-danger">
+                    Удалить задачу
                 </button>
-                <a href="/broadcast" class="glow-button" style="flex:1;">🔄 Обновить</a>
-                <a href="/broadcast/list" class="glow-button" style="flex:1; border-color: #4488ff; color: #4488ff;">📋 Все рассылки</a>
+                <a href="/broadcast" class="glow-button">Обновить</a>
+                <a href="/broadcast/list" class="glow-button">Открыть историю</a>
             </div>
         </div>
 
@@ -960,7 +984,7 @@ async def broadcast_page(request: Request):
 
                         const pauseBtn = document.getElementById('pauseBtn');
                         if (pauseBtn) {{
-                            pauseBtn.style.display = ['running', 'pending'].includes(data.status) ? 'block' : 'none';
+                            pauseBtn.style.display = ['running', 'pending'].includes(data.status) ? 'inline-flex' : 'none';
                         }}
                     }}
                 }} catch (e) {{
@@ -990,7 +1014,7 @@ async def broadcast_page(request: Request):
                 }} catch (e) {{
                     alert('❌ Ошибка: ' + e.message);
                 }} finally {{
-                    btn.textContent = '⏸️ Поставить на паузу';
+                    btn.textContent = 'Поставить на паузу';
                     btn.disabled = false;
                 }}
             }}
@@ -1017,7 +1041,7 @@ async def broadcast_page(request: Request):
                 }} catch (e) {{
                     alert('❌ Ошибка: ' + e.message);
                 }} finally {{
-                    btn.textContent = '🗑️ Удалить рассылку';
+                    btn.textContent = 'Удалить задачу';
                     btn.disabled = false;
                 }}
             }}
@@ -1029,20 +1053,30 @@ async def broadcast_page(request: Request):
         '''
     
     html = f'''
-    <div class="page-title">📢 Рассылка</div>
-    <div class="stats">
-        <div class="stat-card"><div class="stat-number">{total_users}</div><div class="stat-label">Всего пользователей</div></div>
+    <div class="page-heading">
+        <div>
+            <h1>Рассылки</h1>
+            <p>Создавайте сообщения и отслеживайте выполнение каждой задачи.</p>
+        </div>
+        <div class="page-actions">
+            <a href="/broadcast/list" class="button button-secondary">История рассылок</a>
+        </div>
     </div>
-    <div class="form-container">
+    <div class="stats">
+        <div class="stat-card"><span class="icon">◎</span><div class="stat-number">{total_users}</div><div class="stat-label">Доступно получателей</div></div>
+    </div>
+    {result_html}
+    <div class="form-container" style="margin-top:14px;">
+        <div class="panel-title">Новая рассылка</div>
+        <p class="panel-copy" style="margin-bottom:18px;">Сообщение будет поставлено в очередь для всех доступных пользователей.</p>
         <form action="/broadcast/send" method="post">
-            <label for="message">📝 Текст сообщения:</label>
-            <textarea id="message" name="message" rows="5" placeholder="Введите текст рассылки..."></textarea>
+            <label for="message">Текст сообщения</label>
+            <textarea id="message" name="message" rows="5" placeholder="Введите текст рассылки..." required></textarea>
             <div class="mt-20">
-                <button type="submit">🚀 Запустить рассылку</button>
+                <button type="submit">Запустить рассылку</button>
             </div>
         </form>
     </div>
-    {result_html}
     '''
     
     menu = MENU.replace('📢 Рассылка', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">📢 Рассылка</span>')
@@ -1222,7 +1256,17 @@ async def broadcast_list(request: Request):
         print(f"❌ Ошибка загрузки истории: {e}")
         rows = []
     
-    html = '<div class="page-title">📋 История рассылок</div>'
+    html = '''
+    <div class="page-heading">
+        <div>
+            <h1>История рассылок</h1>
+            <p>Последние 50 задач с итоговыми статусами и прогрессом.</p>
+        </div>
+        <div class="page-actions">
+            <a href="/broadcast" class="button">Новая рассылка</a>
+        </div>
+    </div>
+    '''
     
     if rows:
         html += '<div class="table-container"><table><tr><th>ID</th><th>Статус</th><th>Всего</th><th>Отправлено</th><th>Ошибок</th><th>Прогресс</th><th>Создана</th><th>Действие</th></tr>'
@@ -1254,7 +1298,7 @@ async def broadcast_list(request: Request):
                 <td>{row['failed_users']}</td>
                 <td>{row['progress']:.1f}%</td>
                 <td>{row['created_at'].strftime('%d.%m.%Y %H:%M') if row['created_at'] else '-'}</td>
-                <td><a href="/broadcast?job={row['id']}" style="color:#7c3aed;">Подробнее</a></td>
+                <td><a href="/broadcast?job={row['id']}" style="font-weight:700; text-decoration:none;">Подробнее →</a></td>
             </tr>
             '''
         html += '</table></div>'
