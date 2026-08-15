@@ -1867,7 +1867,7 @@ async def payments_page(request: Request):
         html += '''
         <div class="table-container">
             <table>
-                <tr><th>Пользователь</th><th>Сумма</th><th>Статус</th><th>Дата</th><th>TransactionId</th><th>Тип</th></tr>
+                <tr><th>Пользователь</th><th>Сумма</th><th>Статус</th><th>Дата</th><th>TransactionId</th></tr>
         '''
         for payment in payments:
             account_id = escape(str(payment.get("AccountId") or "—"))
@@ -1878,7 +1878,6 @@ async def payments_page(request: Request):
             amount = float(payment.get("Amount") or 0)
             created_at = payment.get("CreatedDateIso") or payment.get("CreatedDate") or "—"
             created_at = escape(str(created_at).replace("T", " ")[:19])
-            payment_type = "Рекуррентный" if payment.get("IsRecurrent") else "Первичный"
             html += f'''
                 <tr>
                     <td><strong>{account_id}</strong></td>
@@ -1886,7 +1885,6 @@ async def payments_page(request: Request):
                     <td><span class="status-pill {status_class}">{escape(status_text)}</span></td>
                     <td>{created_at}</td>
                     <td>{transaction_id}</td>
-                    <td>{payment_type}</td>
                 </tr>
             '''
         html += '</table></div>'
