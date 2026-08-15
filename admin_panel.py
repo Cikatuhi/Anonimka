@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 import psutil
@@ -556,6 +557,34 @@ async def health_check():
     )
 
 
+@app.get("/monitoring/data")
+async def monitoring_data():
+    """Return a fresh server metrics snapshot for the monitoring page."""
+    try:
+        # Keep the short CPU sampling interval off the event loop. Memory and
+        # disk values are instantaneous and can be read directly.
+        cpu = await asyncio.to_thread(psutil.cpu_percent, interval=0.2)
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+        return JSONResponse(
+            content={
+                "ok": True,
+                "cpu": round(float(cpu), 1),
+                "memory": round(float(memory.percent), 1),
+                "disk": round(float(disk.percent), 1),
+                "updated_at": now_msk().strftime("%d.%m.%Y %H:%M:%S МСК"),
+            },
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
+    except Exception as exc:
+        print(f"❌ Monitoring metrics: {exc}", flush=True)
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "Не удалось получить показатели сервера"},
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     total_users = 0
@@ -1014,17 +1043,72 @@ async def webhooks_page(request: Request):
 
 @app.get("/monitoring", response_class=HTMLResponse)
 async def monitoring_page(request: Request):
-    cpu = psutil.cpu_percent(interval=1)
-    memory = psutil.virtual_memory()
-    disk = psutil.disk_usage('/')
-    
-    content = f'''
-    <div class="page-title">📊 Мониторинг сервера</div>
-    <div class="stats">
-        <div class="stat-card"><div class="stat-number">{cpu}%</div><div class="stat-label">CPU</div></div>
-        <div class="stat-card"><div class="stat-number">{memory.percent}%</div><div class="stat-label">Память</div></div>
-        <div class="stat-card"><div class="stat-number">{disk.percent}%</div><div class="stat-label">Диск</div></div>
+    content = '''
+    <div class="page-heading">
+        <div>
+            <h1>📊 Мониторинг сервера</h1>
+            <p>Показатели обновляются автоматически каждые 30 секунд.</p>
+        </div>
+        <div class="page-actions">
+            <button id="monitoring-refresh" type="button" class="button-secondary">↻ Обновить сейчас</button>
+        </div>
     </div>
+    <div class="stats">
+        <div class="stat-card"><div class="stat-number" id="monitoring-cpu">—</div><div class="stat-label">CPU</div></div>
+        <div class="stat-card"><div class="stat-number" id="monitoring-memory">—</div><div class="stat-label">Память</div></div>
+        <div class="stat-card"><div class="stat-number" id="monitoring-disk">—</div><div class="stat-label">Диск</div></div>
+    </div>
+    <div class="panel monitoring-meta" aria-live="polite">
+        <span>Последнее обновление: <strong id="monitoring-updated">загрузка…</strong></span>
+        <span id="monitoring-error" class="status-degraded" role="status"></span>
+    </div>
+    <script>
+        (() => {
+            const cpuElement = document.getElementById('monitoring-cpu');
+            const memoryElement = document.getElementById('monitoring-memory');
+            const diskElement = document.getElementById('monitoring-disk');
+            const updatedElement = document.getElementById('monitoring-updated');
+            const errorElement = document.getElementById('monitoring-error');
+            const refreshButton = document.getElementById('monitoring-refresh');
+            let isRefreshing = false;
+
+            async function refreshMonitoring() {
+                if (isRefreshing) return;
+                isRefreshing = true;
+                refreshButton.disabled = true;
+                errorElement.textContent = '';
+                try {
+                    const response = await fetch('/monitoring/data', {
+                        cache: 'no-store',
+                        headers: { 'Accept': 'application/json' }
+                    });
+                    const data = await response.json();
+                    if (!response.ok || !data.ok) {
+                        throw new Error(data.error || 'Не удалось обновить показатели');
+                    }
+                    cpuElement.textContent = `${Number(data.cpu).toFixed(1)}%`;
+                    memoryElement.textContent = `${Number(data.memory).toFixed(1)}%`;
+                    diskElement.textContent = `${Number(data.disk).toFixed(1)}%`;
+                    updatedElement.textContent = data.updated_at || 'только что';
+                } catch (error) {
+                    errorElement.textContent = `Ошибка обновления: ${error.message}`;
+                } finally {
+                    isRefreshing = false;
+                    refreshButton.disabled = false;
+                }
+            }
+
+            refreshButton.addEventListener('click', refreshMonitoring);
+            refreshMonitoring();
+            const refreshTimer = window.setInterval(refreshMonitoring, 30000);
+            window.addEventListener('pagehide', () => window.clearInterval(refreshTimer), { once: true });
+        })();
+    </script>
+    <style>
+        .monitoring-meta { display: flex; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 12px; }
+        .monitoring-meta strong { color: var(--ink); font-weight: 700; }
+        @media (max-width: 600px) { .monitoring-meta { align-items: flex-start; flex-direction: column; } }
+    </style>
     '''
     
     menu = MENU.replace('📊 Мониторинг', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">📊 Мониторинг</span>')
