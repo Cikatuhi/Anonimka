@@ -1720,30 +1720,33 @@ async def subgram_page(request: Request):
 
 @app.get("/payments", response_class=HTMLResponse)
 async def payments_page(request: Request):
-    requested_date = request.query_params.get("date")
-    try:
-        payment_date = datetime.strptime(
-            requested_date, "%Y-%m-%d"
-        ).strftime("%Y-%m-%d") if requested_date else now_msk().strftime("%Y-%m-%d")
-    except (TypeError, ValueError):
-        payment_date = now_msk().strftime("%Y-%m-%d")
-
     try:
         page = max(1, int(request.query_params.get("page", "1")))
     except (TypeError, ValueError):
         page = 1
 
     page_size = 20
+    api_page_size = 100
+    api_page = ((page - 1) * page_size) // api_page_size + 1
+    page_offset = ((page - 1) * page_size) % api_page_size
+    period_start = "2000-01-01T00:00:00+03:00"
+    period_end = (now_msk() + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00+03:00")
     payments = []
+    has_next_page = False
     api_error = None
     try:
-        result = await CloudPaymentsClient().list_payments(
-            payment_date=payment_date,
-            page=page,
-            count=page_size,
+        result = await CloudPaymentsClient().list_payments_period(
+            created_date_gte=period_start,
+            created_date_lte=period_end,
+            page_number=api_page,
         )
         if result.get("success"):
-            payments = result.get("payments", [])
+            api_payments = result.get("payments", [])
+            payments = api_payments[page_offset:page_offset + page_size]
+            has_next_page = (
+                page_offset + page_size < len(api_payments)
+                or len(api_payments) >= api_page_size
+            )
         else:
             api_error = result.get("error") or "Не удалось получить операции"
     except Exception as e:
@@ -1754,21 +1757,15 @@ async def payments_page(request: Request):
     total_amount = sum(float(item.get("Amount") or 0) for item in payments)
     successful_payments = sum(1 for item in payments if item.get("Status") == "Completed")
     failed_payments = total_payments - successful_payments
-    date_label = datetime.strptime(payment_date, "%Y-%m-%d").strftime("%d.%m.%Y")
 
     html = f'''
     <div class="page-heading">
         <div>
             <h1>💳 Платежи CloudPayments</h1>
-            <p>Операции из CloudPayments за {date_label}. Показаны успешные и неуспешные транзакции.</p>
+            <p>Все операции из CloudPayments за всё время. Показаны успешные и неуспешные транзакции.</p>
         </div>
         <div class="page-actions">
-            <form method="get" action="/payments" style="display:flex;align-items:end;gap:8px;flex-wrap:wrap;">
-                <label style="margin:0;">Дата
-                    <input type="date" name="date" value="{payment_date}" style="display:block;margin-top:5px;width:auto;" />
-                </label>
-                <button type="submit">Обновить</button>
-            </form>
+            <a class="button button-secondary" href="/payments">Обновить</a>
         </div>
     </div>
 
@@ -1809,11 +1806,11 @@ async def payments_page(request: Request):
                 </tr>
             '''
         html += '</table></div>'
-        previous = f'<a class="button button-secondary" href="/payments?date={payment_date}&page={page - 1}">← Предыдущая</a>' if page > 1 else ''
-        next_page = f'<a class="button button-secondary" href="/payments?date={payment_date}&page={page + 1}">Следующая →</a>' if len(payments) == page_size else ''
+        previous = f'<a class="button button-secondary" href="/payments?page={page - 1}">← Предыдущая</a>' if page > 1 else ''
+        next_page = f'<a class="button button-secondary" href="/payments?page={page + 1}">Следующая →</a>' if has_next_page else ''
         html += f'<div class="page-actions" style="justify-content:space-between;margin-top:16px;"><span class="panel-copy">Страница {page}</span><div style="display:flex;gap:8px;">{previous}{next_page}</div></div>'
     else:
-        html += '<div class="empty">За выбранную дату операций CloudPayments нет.</div>'
+        html += '<div class="empty">За всё время операций CloudPayments нет.</div>'
 
     menu = MENU.replace('💳 Платежи', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">💳 Платежи</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
