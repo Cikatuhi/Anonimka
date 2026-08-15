@@ -561,7 +561,6 @@ async def dashboard(request: Request):
     total_users = 0
     total_messages = 0
     total_subscriptions = 0
-    active_broadcasts = 0
     worker_alive = False
     
     try:
@@ -577,13 +576,8 @@ async def dashboard(request: Request):
                         FROM subscriptions
                         WHERE status = 'active'
                           AND (end_date IS NULL OR end_date > NOW())
-                    ) AS total_subscriptions
-                    ,(
-                        SELECT COUNT(*)
-                        FROM broadcast_jobs
-                        WHERE status IN ('pending', 'running', 'paused')
-                    ) AS active_broadcasts
-                    ,EXISTS (
+                    ) AS total_subscriptions,
+                    EXISTS (
                         SELECT 1
                         FROM service_heartbeats
                         WHERE service = 'worker'
@@ -594,7 +588,6 @@ async def dashboard(request: Request):
             total_users = stats["total_users"]
             total_messages = stats["total_messages"]
             total_subscriptions = stats["total_subscriptions"]
-            active_broadcasts = stats["active_broadcasts"]
             worker_alive = bool(stats["worker_alive"])
         finally:
             await database.release_conn(conn)
@@ -619,7 +612,6 @@ async def dashboard(request: Request):
         <div class="stat-card"><span class="icon">◎</span><div class="stat-number">{total_users}</div><div class="stat-label">Всего пользователей</div></div>
         <div class="stat-card"><span class="icon">◇</span><div class="stat-number">{total_subscriptions}</div><div class="stat-label">Активные подписки</div></div>
         <div class="stat-card"><span class="icon">≋</span><div class="stat-number">{total_messages}</div><div class="stat-label">Сообщений отправлено</div></div>
-        <div class="stat-card"><span class="icon">✦</span><div class="stat-number">{active_broadcasts}</div><div class="stat-label">Активные рассылки</div></div>
     </div>
     <div class="quick-grid">
         <section class="panel">
