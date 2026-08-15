@@ -1821,41 +1821,37 @@ async def subgram_page(request: Request):
             bots_info = balance_data.get("bots_info", [])
         else:
             error_message = balance_data.get("message", "Неизвестная ошибка")
-        
+
+        bot_info = bots_info[0] if bots_info else None
+
         html = f'''
         <div class="page-title">📊 SubGram Статистика</div>
-        
+
         <div class="stats">
             <div class="stat-card">
                 <div class="stat-number">{balance} ₽</div>
                 <div class="stat-label">Баланс аккаунта</div>
             </div>
-        </div>
         '''
-        
+
+        if bot_info:
+            html += f'''
+            <div class="stat-card">
+                <div class="stat-number">{bot_info.get("total_followers", 0)}</div>
+                <div class="stat-label">Подписчиков приведено</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">{bot_info.get("revenue", 0)} ₽</div>
+                <div class="stat-label">Заработано</div>
+            </div>
+            '''
+
+        html += '</div>'
+
         if error_message:
             html += f'<div class="empty" style="color:#ff4488;">❌ Ошибка: {error_message}</div>'
-        
-        if bots_info:
-            html += '''
-            <div class="table-container">
-                <table>
-                    <tr>
-                        <th>Бот</th>
-                        <th>Подписчиков приведено</th>
-                        <th>Заработано</th>
-                    </tr>
-            '''
-            for bot in bots_info:
-                html += f'''
-                <tr>
-                    <td>@{bot.get("bot_username", "—")}</td>
-                    <td>{bot.get("total_followers", 0)}</td>
-                    <td>{bot.get("revenue", 0)} ₽</td>
-                </tr>
-                '''
-            html += '</table></div>'
-        else:
+
+        if not bots_info:
             html += '<div class="empty">😕 Нет данных по ботам или они не подключены.</div>'
         
         menu = MENU.replace('📊 SubGram', '<span style="color:#ffaa44; text-shadow: 0 0 30px #ffaa4444;">📊 SubGram</span>')
