@@ -23,8 +23,8 @@ async def get_job_status(job_id: int) -> str:
 async def update_job_status(job_id, status, **kwargs):
     conn = await database.get_conn()
     try:
-        fields = []
-        values = []
+        fields = ["status = $1"]
+        values = [status]
         for key, val in kwargs.items():
             fields.append(f"{key} = ${len(values)+1}")
             values.append(val)
@@ -34,10 +34,35 @@ async def update_job_status(job_id, status, **kwargs):
     finally:
         await database.release_conn(conn)
 
+async def claim_next_job():
+    """Atomically claim the oldest pending job for this worker."""
+    conn = await database.get_conn()
+    try:
+        async with conn.transaction():
+            return await conn.fetchrow(
+                """
+                WITH next_job AS (
+                    SELECT id
+                    FROM broadcast_jobs
+                    WHERE status = 'pending'
+                    ORDER BY created_at, id
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
+                )
+                UPDATE broadcast_jobs AS jobs
+                SET status = 'running',
+                    started_at = NOW()
+                FROM next_job
+                WHERE jobs.id = next_job.id
+                RETURNING jobs.*
+                """
+            )
+    finally:
+        await database.release_conn(conn)
+
 async def process_job(job):
     job_id = job['id']
     
-    await update_job_status(job_id, 'running', started_at=now_msk())
     
     user_ids = json.loads(job['user_ids_json'])
     message = job['message']
@@ -146,12 +171,7 @@ async def main_loop():
     print("🚀 Воркер запущен, ждём задачи...")
     while True:
         try:
-            conn = await database.get_conn()
-            
-            job = await conn.fetchrow(
-                "SELECT * FROM broadcast_jobs WHERE status = 'pending' ORDER BY created_at LIMIT 1"
-            )
-            await database.release_conn(conn)
+            job = await claim_next_job()
             
             if job:
                 print(f"📨 Найдена задача {job['id']}, начинаем обработку...")
