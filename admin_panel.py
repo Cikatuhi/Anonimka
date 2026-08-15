@@ -1872,6 +1872,7 @@ async def payments_page(request: Request):
 
     page_size = 20
     payments = []
+    all_payments = []
     has_next_page = False
     api_error = None
     try:
@@ -1907,20 +1908,18 @@ async def payments_page(request: Request):
             created_date_lte=period_end,
         )
         if result.get("success"):
-            api_payments = result.get("payments", [])
+            all_payments = result.get("payments", [])
             page_offset = (page - 1) * page_size
-            payments = api_payments[page_offset:page_offset + page_size]
-            has_next_page = page_offset + page_size < len(api_payments)
+            payments = all_payments[page_offset:page_offset + page_size]
+            has_next_page = page_offset + page_size < len(all_payments)
         else:
             api_error = result.get("error") or "Не удалось получить операции"
     except Exception as e:
         print(f"❌ Ошибка загрузки операций CloudPayments: {e}", flush=True)
         api_error = "CloudPayments временно недоступен"
 
-    total_payments = len(payments)
-    total_amount = sum(float(item.get("Amount") or 0) for item in payments)
-    successful_payments = sum(1 for item in payments if item.get("Status") == "Completed")
-    failed_payments = total_payments - successful_payments
+    successful_payments = sum(1 for item in all_payments if item.get("Status") == "Completed")
+    failed_payments = len(all_payments) - successful_payments
 
     html = f'''
     <div class="page-heading">
@@ -1934,10 +1933,8 @@ async def payments_page(request: Request):
     </div>
 
     <div class="stats">
-        <div class="stat-card"><div class="stat-number">{total_payments}</div><div class="stat-label">Операций на странице</div></div>
-        <div class="stat-card"><div class="stat-number">{total_amount:.2f} ₽</div><div class="stat-label">Сумма на странице</div></div>
-        <div class="stat-card"><div class="stat-number" style="color:var(--success);">{successful_payments}</div><div class="stat-label">✅ Успешных</div></div>
-        <div class="stat-card"><div class="stat-number" style="color:var(--danger);">{failed_payments}</div><div class="stat-label">❌ Неуспешных</div></div>
+        <div class="stat-card"><div class="stat-number" style="color:var(--success);">{successful_payments}</div><div class="stat-label">✅ Успешных за всё время</div></div>
+        <div class="stat-card"><div class="stat-number" style="color:var(--danger);">{failed_payments}</div><div class="stat-label">❌ Неуспешных за всё время</div></div>
     </div>
     '''
 
