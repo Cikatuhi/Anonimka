@@ -896,7 +896,7 @@ async def broadcast_page(request: Request):
         
         result_html = f'''
         <div class="result-box" style="border-color: #7c3aed44; margin-top: 20px;" id="broadcast-stats">
-            <h2 style="color: #7c3aed;">📊 Статистика рассылки - <span class="status-value {status_class}">{status_label}</span></h2>
+            <h2 style="color: #7c3aed;">📊 Статистика рассылки #{job_id} - <span class="status-value {status_class}">{status_label}</span></h2>
             <div class="result-stats">
                 <div class="stat-total"><div class="number">{total}</div><div class="label">Всего пользователей</div></div>
                 <div class="stat-sent"><div class="number" style="color: #7c3aed;">{sent}</div><div class="label">✅ Успешно отправлено</div></div>
@@ -910,7 +910,7 @@ async def broadcast_page(request: Request):
             
             <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
                 <button onclick="pauseBroadcast()" id="pauseBtn" 
-                        style="flex:1; padding: 12px 20px; border: 2px solid #ffaa44; border-radius: 8px; 
+                        style="display: {'block' if status_text in ('running', 'pending') else 'none'}; flex:1; padding: 12px 20px; border: 2px solid #ffaa44; border-radius: 8px; 
                                background: transparent; color: #ffaa44; font-weight: 600; font-size: 14px; 
                                cursor: pointer; transition: all 0.3s ease;"
                         onmouseover="this.style.background='#ffaa4422'; this.style.boxShadow='0 0 30px #ffaa4455';"
@@ -957,6 +957,11 @@ async def broadcast_page(request: Request):
                         }};
                         document.querySelector('.status-value').textContent = statusLabel[data.status] || data.status;
                         document.querySelector('.status-value').className = 'status-value status-' + data.status;
+
+                        const pauseBtn = document.getElementById('pauseBtn');
+                        if (pauseBtn) {{
+                            pauseBtn.style.display = ['running', 'pending'].includes(data.status) ? 'block' : 'none';
+                        }}
                     }}
                 }} catch (e) {{
                     console.error('Ошибка обновления статуса:', e);
