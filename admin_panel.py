@@ -213,6 +213,13 @@ BASE_HTML = '''
         .stat-label { font-size: 12px; color: var(--muted); margin-top: 8px; }
         .stat-card .icon { width: 30px; height: 30px; margin-bottom: 17px; display: grid; place-items: center; border-radius: 9px; background: var(--accent-soft); color: var(--accent-dark); font-size: 14px; }
         .quick-grid { display: grid; grid-template-columns: 1.35fr .65fr; gap: 14px; }
+        .system-status-grid { display: grid; gap: 9px; margin-top: 18px; }
+        .system-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-soft); font-size: 13px; }
+        .status-pill { display: inline-flex; align-items: center; gap: 6px; font-weight: 750; font-size: 12px; }
+        .status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+        .status-ok { color: var(--success); }
+        .status-degraded { color: var(--warning); }
+        .status-down { color: var(--danger); }
         .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 15px; padding: 22px; box-shadow: 0 7px 24px rgba(34,72,68,.035); }
         .panel-title { font-size: 15px; font-weight: 740; margin-bottom: 6px; }
         .panel-copy { color: var(--muted); font-size: 13px; }
@@ -360,7 +367,7 @@ def get_session_user(token: str) -> dict:
 sessions = {}
 
 async def auth_middleware(request: Request, call_next):
-    if request.url.path == "/admin/login":
+    if request.url.path in {"/admin/login", "/health"}:
         return await call_next(request)
     
     session_token = request.cookies.get("admin_session")
@@ -419,11 +426,52 @@ async def logout():
     response.delete_cookie("admin_session")
     return response
 
+
+@app.get("/health")
+async def health_check():
+    """Return a lightweight status suitable for monitoring services."""
+    try:
+        conn = await database.get_conn()
+        try:
+            await conn.fetchval("SELECT 1")
+            worker_alive = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM service_heartbeats
+                    WHERE service = 'worker'
+                      AND heartbeat_at >= NOW() - INTERVAL '2 minutes'
+                )
+                """
+            )
+        finally:
+            await database.release_conn(conn)
+    except Exception as exc:
+        print(f"❌ Health check: {exc}", flush=True)
+        return JSONResponse(
+            status_code=503,
+            content={"status": "down", "database": "error", "worker": "unknown"},
+        )
+
+    status = "ok" if worker_alive else "degraded"
+    return JSONResponse(
+        status_code=200 if worker_alive else 503,
+        content={
+            "status": status,
+            "database": "ok",
+            "worker": "ok" if worker_alive else "stale",
+        },
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     total_users = 0
     total_messages = 0
     total_subscriptions = 0
+    active_broadcasts = 0
+    completed_broadcasts_today = 0
+    worker_alive = False
     
     try:
         conn = await database.get_conn()
@@ -439,18 +487,40 @@ async def dashboard(request: Request):
                         WHERE status = 'active'
                           AND (end_date IS NULL OR end_date > NOW())
                     ) AS total_subscriptions
+                    ,(
+                        SELECT COUNT(*)
+                        FROM broadcast_jobs
+                        WHERE status IN ('pending', 'running', 'paused')
+                    ) AS active_broadcasts
+                    ,(
+                        SELECT COUNT(*)
+                        FROM broadcast_jobs
+                        WHERE status = 'completed'
+                          AND finished_at >= CURRENT_DATE
+                    ) AS completed_broadcasts_today
+                    ,EXISTS (
+                        SELECT 1
+                        FROM service_heartbeats
+                        WHERE service = 'worker'
+                          AND heartbeat_at >= NOW() - INTERVAL '2 minutes'
+                    ) AS worker_alive
                 """
             )
             total_users = stats["total_users"]
             total_messages = stats["total_messages"]
             total_subscriptions = stats["total_subscriptions"]
+            active_broadcasts = stats["active_broadcasts"]
+            completed_broadcasts_today = stats["completed_broadcasts_today"]
+            worker_alive = bool(stats["worker_alive"])
         finally:
             await database.release_conn(conn)
     except Exception as e:
-        print(f"❌ Ошибка БД в дашборде: {e}")
+        print(f"❌ Ошибка БД в дашборде: {e}", flush=True)
         import traceback
         traceback.print_exc()
 
+    worker_status = "ok" if worker_alive else "degraded"
+    worker_label = "Работает" if worker_alive else "Нет свежего сигнала"
     content = f'''
     <div class="page-heading">
         <div>
@@ -465,6 +535,7 @@ async def dashboard(request: Request):
         <div class="stat-card"><span class="icon">◎</span><div class="stat-number">{total_users}</div><div class="stat-label">Всего пользователей</div></div>
         <div class="stat-card"><span class="icon">◇</span><div class="stat-number">{total_subscriptions}</div><div class="stat-label">Активные подписки</div></div>
         <div class="stat-card"><span class="icon">≋</span><div class="stat-number">{total_messages}</div><div class="stat-label">Сообщений отправлено</div></div>
+        <div class="stat-card"><span class="icon">✦</span><div class="stat-number">{active_broadcasts}</div><div class="stat-label">Активные рассылки</div></div>
     </div>
     <div class="quick-grid">
         <section class="panel">
@@ -478,12 +549,39 @@ async def dashboard(request: Request):
         </section>
         <section class="panel">
             <div class="panel-title">Состояние системы</div>
-            <p class="panel-copy">Метрики нагрузки и доступности сервера.</p>
+            <p class="panel-copy">Проверяется автоматически при открытии и обновляется раз в минуту.</p>
+            <div class="system-status-grid">
+                <div class="system-status-row"><span>Админ-панель</span><span class="status-pill status-ok" id="admin-health">Работает</span></div>
+                <div class="system-status-row"><span>База данных</span><span class="status-pill status-ok" id="database-health">Подключена</span></div>
+                <div class="system-status-row"><span>Worker рассылок</span><span class="status-pill status-{worker_status}" id="worker-health">{worker_label}</span></div>
+            </div>
             <div class="quick-links">
-                <a class="quick-link" href="/monitoring"><span>Открыть мониторинг</span><span>→</span></a>
+                <a class="quick-link" href="/monitoring"><span>Открыть мониторинг сервера</span><span>→</span></a>
             </div>
         </section>
     </div>
+    <div class="panel" style="margin-top:14px;">
+        <div class="panel-title">Сегодня</div>
+        <p class="panel-copy">Завершено рассылок: <strong>{completed_broadcasts_today}</strong></p>
+    </div>
+    <script>
+        async function refreshSystemHealth() {{
+            try {{
+                const response = await fetch('/health', {{ cache: 'no-store' }});
+                const data = await response.json();
+                const worker = document.getElementById('worker-health');
+                const database = document.getElementById('database-health');
+                worker.textContent = data.worker === 'ok' ? 'Работает' : 'Нет свежего сигнала';
+                worker.className = 'status-pill status-' + (data.worker === 'ok' ? 'ok' : 'degraded');
+                database.textContent = data.database === 'ok' ? 'Подключена' : 'Ошибка';
+                database.className = 'status-pill status-' + (data.database === 'ok' ? 'ok' : 'down');
+            }} catch (error) {{
+                document.getElementById('database-health').textContent = 'Нет связи';
+                document.getElementById('database-health').className = 'status-pill status-down';
+            }}
+        }}
+        window.setInterval(refreshSystemHealth, 60000);
+    </script>
     '''
     
     menu = MENU.replace('📊 Дашборд', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">📊 Дашборд</span>')

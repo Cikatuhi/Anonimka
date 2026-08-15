@@ -66,6 +66,19 @@ async def get_job_status(job_id: int) -> str | None:
         )
 
 
+async def touch_service_heartbeat() -> None:
+    """Record that this worker process is alive for the admin health check."""
+    async with database.connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO service_heartbeats (service, heartbeat_at)
+            VALUES ('worker', NOW())
+            ON CONFLICT (service)
+            DO UPDATE SET heartbeat_at = EXCLUDED.heartbeat_at
+            """
+        )
+
+
 async def recover_stale_work() -> None:
     """Make jobs abandoned by a crashed worker available again.
 
@@ -279,7 +292,7 @@ async def process_job(job):
             if current_status in {"paused", "cancelled", "archived"}:
                 await release_processing(job_id, "pending" if current_status == "paused" else "cancelled")
                 await sync_job_counts(job_id)
-                print(f"⏸️ Задача {job_id} остановлена со статусом {current_status}")
+                print(f"⏸️ Задача {job_id} остановлена со статусом {current_status}", flush=True)
                 return
             if current_status != "running":
                 return
@@ -289,7 +302,7 @@ async def process_job(job):
                 stats = await sync_job_counts(job_id)
                 if not stats["pending"] and not stats["processing"]:
                     await sync_job_counts(job_id, final_status="completed")
-                    print(f"✅ Задача {job_id} завершена")
+                    print(f"✅ Задача {job_id} завершена", flush=True)
                     return
                 await asyncio.sleep(1)
                 continue
@@ -299,6 +312,7 @@ async def process_job(job):
                 if await get_job_status(job_id) != "running":
                     break
                 try:
+                    await touch_service_heartbeat()
                     response = await send_telegram_message(
                         client,
                         user_id,
@@ -341,19 +355,21 @@ async def process_job(job):
 
 async def main_loop():
     await database.ensure_broadcast_schema()
+    await touch_service_heartbeat()
     await recover_stale_work()
-    print("🚀 Воркер запущен, ждём задачи...")
+    print("🚀 Воркер запущен, ждём задачи...", flush=True)
     while True:
         try:
+            await touch_service_heartbeat()
             await recover_stale_work()
             job = await claim_next_job()
             if job:
-                print(f"📨 Найдена задача {job['id']}, начинаем обработку...")
+                print(f"📨 Найдена задача {job['id']}, начинаем обработку...", flush=True)
                 await process_job(job)
             else:
                 await asyncio.sleep(5)
         except Exception as exc:
-            print(f"❌ Ошибка worker: {exc}")
+            print(f"❌ Ошибка worker: {exc}", flush=True)
             await asyncio.sleep(5)
 
 
