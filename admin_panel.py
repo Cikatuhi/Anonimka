@@ -142,7 +142,6 @@ MENU = '''
         <div class="nav-section-title">Монетизация</div>
         <a class="nav-link" data-nav href="/subscriptions"><span class="nav-icon">◇</span><span>Подписки</span></a>
         <a class="nav-link" data-nav href="/payments"><span class="nav-icon">₽</span><span>Платежи</span></a>
-        <a class="nav-link" data-nav href="/withdrawals"><span class="nav-icon">↗</span><span>Снятия</span></a>
         <a class="nav-link" data-nav href="/subgram"><span class="nav-icon">◉</span><span>SubGram</span></a>
     </div>
     <div class="nav-section">
@@ -940,12 +939,6 @@ async def webhooks_page(request: Request):
     menu = MENU.replace('📨 Вебхуки', '<span style="color:#ffaa44; text-shadow: 0 0 30px #ffaa4444;">📨 Вебхуки</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
-
-@app.get("/withdrawals", response_class=HTMLResponse)
-async def withdrawals_page(request: Request):
-    html = '<div class="page-title">💰 Снятия</div><div class="empty">🔧 Раздел в разработке</div>'
-    menu = MENU.replace('💰 Снятия', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">💰 Снятия</span>')
-    return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 
 @app.get("/monitoring", response_class=HTMLResponse)
 async def monitoring_page(request: Request):
