@@ -948,17 +948,62 @@ async def monitoring_page(request: Request):
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
+    try:
+        current_value = await database.get_setting("show_payment_checkboxes", "true")
+        confirmation_enabled = str(current_value).lower() == "true"
+        status_label = "Включено" if confirmation_enabled else "Отключено"
+        status_class = "status-ok" if confirmation_enabled else "status-down"
+    except Exception as exc:
+        print(f"⚠️ Не удалось получить настройку подтверждения: {exc}", flush=True)
+        confirmation_enabled = None
+        status_label = "Не удалось проверить"
+        status_class = "status-degraded"
+
     html = '''
     <div class="page-title">⚙️ Настройки</div>
     <div class="form-container">
-        <h3 style="color: #7c3aed; margin-bottom: 15px;">Управление подтверждением</h3>
-        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-            <button onclick="setSetting('true')" class="glow-button" style="flex:1; border-color: #7c3aed; color: #7c3aed;">✅ Включить подтверждение</button>
-            <button onclick="setSetting('false')" class="glow-button" style="flex:1; border-color: #ff4488; color: #ff4488;">❌ Отключить подтверждение</button>
+        <h3 style="margin-bottom: 7px;">Подтверждение оплаты</h3>
+        <p style="color: var(--muted); font-size: 13px; margin-bottom: 18px;">Показывает пользователю элементы подтверждения после оплаты.</p>
+        <div class="system-status-row" style="margin-bottom: 18px;">
+            <span>Текущий статус</span>
+            <span id="confirmation-status" class="status-pill __STATUS_CLASS__">__STATUS_LABEL__</span>
         </div>
+        <div class="setting-actions">
+            <button id="enable-confirmation" onclick="setSetting('true')" class="glow-button setting-choice __ENABLE_ACTIVE__" aria-pressed="__ENABLE_PRESSED__">✅ Включить</button>
+            <button id="disable-confirmation" onclick="setSetting('false')" class="glow-button setting-choice __DISABLE_ACTIVE__" aria-pressed="__DISABLE_PRESSED__">❌ Отключить</button>
+        </div>
+        <div id="setting-feedback" class="setting-feedback" role="status" aria-live="polite"></div>
     </div>
+    <style>
+        .setting-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .setting-choice { width: 100%; }
+        .setting-choice.is-active { background: var(--accent-soft); border-color: var(--accent) !important; color: var(--accent-dark) !important; box-shadow: 0 0 0 3px rgba(17, 139, 126, .08); }
+        #disable-confirmation.is-active { background: #fff5f5; border-color: #dbaeb1 !important; color: var(--danger) !important; box-shadow: 0 0 0 3px rgba(184, 75, 81, .07); }
+        .setting-feedback { min-height: 20px; margin-top: 12px; color: var(--success); font-size: 12px; font-weight: 650; }
+        .setting-feedback.is-error { color: var(--danger); }
+        @media (max-width: 560px) { .setting-actions { grid-template-columns: 1fr; } }
+    </style>
     <script>
+        const enableButton = document.getElementById('enable-confirmation');
+        const disableButton = document.getElementById('disable-confirmation');
+        const statusElement = document.getElementById('confirmation-status');
+        const feedbackElement = document.getElementById('setting-feedback');
+
+        function renderSetting(enabled) {
+            statusElement.textContent = enabled ? 'Включено' : 'Отключено';
+            statusElement.className = 'status-pill ' + (enabled ? 'status-ok' : 'status-down');
+            enableButton.classList.toggle('is-active', enabled);
+            disableButton.classList.toggle('is-active', !enabled);
+            enableButton.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+            disableButton.setAttribute('aria-pressed', enabled ? 'false' : 'true');
+        }
+
         async function setSetting(value) {
+            const enabled = value === 'true';
+            enableButton.disabled = true;
+            disableButton.disabled = true;
+            feedbackElement.textContent = 'Сохраняем…';
+            feedbackElement.classList.remove('is-error');
             try {
                 const response = await fetch('/api/settings/update', {
                     method: 'POST',
@@ -966,19 +1011,58 @@ async def settings_page(request: Request):
                     body: JSON.stringify({ key: 'show_payment_checkboxes', value: value })
                 });
                 const data = await response.json();
-                if (data.success) {
-                    alert('✅ Настройка сохранена!');
-                } else {
-                    alert('❌ Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+                if (!response.ok || !data.success) {
+                    throw new Error(data.error || 'Не удалось сохранить настройку');
                 }
+                renderSetting(enabled);
+                feedbackElement.textContent = '✓ Настройка сохранена';
             } catch (e) {
-                alert('❌ Ошибка: ' + e.message);
+                feedbackElement.textContent = 'Ошибка: ' + e.message;
+                feedbackElement.classList.add('is-error');
+            } finally {
+                enableButton.disabled = false;
+                disableButton.disabled = false;
             }
         }
     </script>
     '''
+    html = (html
+        .replace('__STATUS_CLASS__', status_class)
+        .replace('__STATUS_LABEL__', status_label)
+        .replace('__ENABLE_ACTIVE__', 'is-active' if confirmation_enabled is True else '')
+        .replace('__DISABLE_ACTIVE__', 'is-active' if confirmation_enabled is False else '')
+        .replace('__ENABLE_PRESSED__', 'true' if confirmation_enabled is True else 'false')
+        .replace('__DISABLE_PRESSED__', 'true' if confirmation_enabled is False else 'false'))
     menu = MENU.replace('⚙️ Настройки', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">⚙️ Настройки</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
+
+
+@app.post("/api/settings/update")
+async def update_setting(request: Request):
+    try:
+        body = await request.json()
+        key = body.get("key")
+        value = str(body.get("value", "")).lower()
+
+        if key != "show_payment_checkboxes":
+            return JSONResponse(
+                content={"success": False, "error": "Неизвестная настройка"},
+                status_code=400,
+            )
+        if value not in {"true", "false"}:
+            return JSONResponse(
+                content={"success": False, "error": "Некорректное значение"},
+                status_code=400,
+            )
+
+        await database.set_setting(key, value)
+        return JSONResponse(content={"success": True, "value": value})
+    except Exception as exc:
+        print(f"❌ Не удалось сохранить настройку подтверждения: {exc}", flush=True)
+        return JSONResponse(
+            content={"success": False, "error": "Не удалось сохранить настройку"},
+            status_code=500,
+        )
 
 
 @app.get("/broadcast", response_class=HTMLResponse)
