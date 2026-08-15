@@ -106,7 +106,7 @@ async def process_job(job):
             if i % 10 == 0 and i > 0:
                 cpu = psutil.cpu_percent()
                 if cpu > 80:
-                    await update_job_status(job_id, 'paused', paused_at=now_msk())
+                    await update_job_status(job_id, 'paused', paused_at=now_msk().replace(tzinfo=None))
                     while psutil.cpu_percent() > 60:
                         await asyncio.sleep(5)
                     current_status = await get_job_status(job_id)
@@ -163,7 +163,7 @@ async def process_job(job):
         failed_users=results['failed'],
         blocked_users=results['blocked'],
         progress=100,
-        finished_at=now_msk()
+        finished_at=now_msk().replace(tzinfo=None)
     )
     print(f"✅ Задача {job_id} завершена")
 
