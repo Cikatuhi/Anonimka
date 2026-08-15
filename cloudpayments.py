@@ -1,4 +1,5 @@
 import base64
+import asyncio
 import httpx
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
@@ -203,6 +204,71 @@ class CloudPaymentsClient:
         except Exception as e:
             logger.error("Error loading CloudPayments transactions for period: %s", e)
             return {"success": False, "error": str(e)}
+
+    async def list_payments_all_time(
+        self,
+        created_date_gte: datetime,
+        created_date_lte: datetime,
+        concurrency: int = 4,
+    ) -> Dict[str, Any]:
+        """Load the complete transaction history in CloudPayments-safe chunks.
+
+        CloudPayments rejects a v2 request whose period is longer than 24
+        hours, so a full history must be split into one-day intervals. Results
+        are de-duplicated because the API treats both interval boundaries as
+        inclusive and are returned newest first for the admin UI.
+        """
+        if created_date_gte >= created_date_lte:
+            return {"success": True, "payments": [], "has_more": False}
+
+        intervals = []
+        cursor = created_date_gte
+        while cursor < created_date_lte:
+            interval_end = min(cursor + timedelta(days=1), created_date_lte)
+            intervals.append((cursor.isoformat(), interval_end.isoformat()))
+            cursor = interval_end
+
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+
+        async def load_interval(start: str, end: str) -> list[dict[str, Any]]:
+            async with semaphore:
+                page_number = 1
+                interval_payments = []
+                while True:
+                    result = await self.list_payments_period(
+                        created_date_gte=start,
+                        created_date_lte=end,
+                        page_number=page_number,
+                    )
+                    if not result.get("success"):
+                        raise RuntimeError(result.get("error") or "CloudPayments не вернул платежи")
+
+                    interval_payments.extend(result.get("payments", []))
+                    if not result.get("has_more"):
+                        return interval_payments
+                    page_number += 1
+
+        try:
+            interval_results = await asyncio.gather(
+                *(load_interval(start, end) for start, end in intervals)
+            )
+        except Exception as e:
+            logger.error("Error loading all CloudPayments transactions: %s", e)
+            return {"success": False, "error": str(e)}
+
+        unique_payments = {}
+        for interval_payments in interval_results:
+            for payment in interval_payments:
+                transaction_id = payment.get("TransactionId")
+                key = str(transaction_id) if transaction_id is not None else repr(payment)
+                unique_payments[key] = payment
+
+        payments = list(unique_payments.values())
+        payments.sort(
+            key=lambda item: str(item.get("CreatedDateIso") or item.get("CreatedDate") or ""),
+            reverse=True,
+        )
+        return {"success": True, "payments": payments, "has_more": False}
     
     async def create_subscription(self,
                                   token: str,

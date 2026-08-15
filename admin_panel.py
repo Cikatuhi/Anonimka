@@ -1726,27 +1726,46 @@ async def payments_page(request: Request):
         page = 1
 
     page_size = 20
-    api_page_size = 100
-    api_page = ((page - 1) * page_size) // api_page_size + 1
-    page_offset = ((page - 1) * page_size) % api_page_size
-    period_start = "2000-01-01T00:00:00+03:00"
-    period_end = (now_msk() + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00+03:00")
     payments = []
     has_next_page = False
     api_error = None
     try:
-        result = await CloudPaymentsClient().list_payments_period(
+        now = now_msk()
+        period_end = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        period_start = period_end - timedelta(days=1)
+
+        # All user payments must belong to a user known by the bot. Starting
+        # from the first local record avoids thousands of empty API requests
+        # while still covering the complete history of this project.
+        conn = await database.get_conn()
+        try:
+            first_record = await conn.fetchval(
+                """
+                SELECT LEAST(
+                    COALESCE((SELECT MIN(registered_at) FROM users), NOW()),
+                    COALESCE((SELECT MIN(created_at) FROM subscriptions), NOW())
+                )
+                """
+            )
+        finally:
+            await database.release_conn(conn)
+
+        if first_record:
+            if first_record.tzinfo is None:
+                first_record = first_record.replace(tzinfo=now.tzinfo)
+            period_start = first_record.astimezone(now.tzinfo).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ) - timedelta(days=1)
+
+        result = await CloudPaymentsClient().list_payments_all_time(
             created_date_gte=period_start,
             created_date_lte=period_end,
-            page_number=api_page,
         )
         if result.get("success"):
             api_payments = result.get("payments", [])
+            page_offset = (page - 1) * page_size
             payments = api_payments[page_offset:page_offset + page_size]
-            has_next_page = (
-                page_offset + page_size < len(api_payments)
-                or len(api_payments) >= api_page_size
-            )
+            has_next_page = page_offset + page_size < len(api_payments)
         else:
             api_error = result.get("error") or "Не удалось получить операции"
     except Exception as e:
