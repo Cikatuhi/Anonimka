@@ -470,7 +470,6 @@ async def dashboard(request: Request):
     total_messages = 0
     total_subscriptions = 0
     active_broadcasts = 0
-    completed_broadcasts_today = 0
     worker_alive = False
     
     try:
@@ -492,12 +491,6 @@ async def dashboard(request: Request):
                         FROM broadcast_jobs
                         WHERE status IN ('pending', 'running', 'paused')
                     ) AS active_broadcasts
-                    ,(
-                        SELECT COUNT(*)
-                        FROM broadcast_jobs
-                        WHERE status = 'completed'
-                          AND finished_at >= CURRENT_DATE
-                    ) AS completed_broadcasts_today
                     ,EXISTS (
                         SELECT 1
                         FROM service_heartbeats
@@ -510,7 +503,6 @@ async def dashboard(request: Request):
             total_messages = stats["total_messages"]
             total_subscriptions = stats["total_subscriptions"]
             active_broadcasts = stats["active_broadcasts"]
-            completed_broadcasts_today = stats["completed_broadcasts_today"]
             worker_alive = bool(stats["worker_alive"])
         finally:
             await database.release_conn(conn)
@@ -559,10 +551,6 @@ async def dashboard(request: Request):
                 <a class="quick-link" href="/monitoring"><span>Открыть мониторинг сервера</span><span>→</span></a>
             </div>
         </section>
-    </div>
-    <div class="panel" style="margin-top:14px;">
-        <div class="panel-title">Сегодня</div>
-        <p class="panel-copy">Завершено рассылок: <strong>{completed_broadcasts_today}</strong></p>
     </div>
     <script>
         async function refreshSystemHealth() {{
