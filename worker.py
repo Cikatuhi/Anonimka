@@ -1,4 +1,5 @@
 import asyncio
+import html
 import os
 
 import httpx
@@ -10,6 +11,52 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BATCH_SIZE = 50
 STALE_AFTER_MINUTES = 15
+MAX_SEND_ATTEMPTS = 3
+RETRY_BASE_SECONDS = 1.0
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+async def send_telegram_message(client, user_id: int, message_text: str, keyboard: dict):
+    """Send one message, retrying transient Telegram/network failures."""
+    payload = {
+        "chat_id": user_id,
+        "text": message_text,
+        "parse_mode": "HTML",
+        "reply_markup": keyboard,
+    }
+    last_error = None
+
+    for attempt in range(1, MAX_SEND_ATTEMPTS + 1):
+        try:
+            response = await client.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json=payload,
+            )
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            last_error = exc
+            if attempt == MAX_SEND_ATTEMPTS:
+                raise
+            await asyncio.sleep(RETRY_BASE_SECONDS * (2 ** (attempt - 1)))
+            continue
+
+        if response.status_code not in RETRYABLE_STATUS_CODES:
+            return response
+        if attempt == MAX_SEND_ATTEMPTS:
+            return response
+
+        delay = RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+        if response.status_code == 429:
+            try:
+                retry_after = response.json().get("parameters", {}).get("retry_after")
+                if retry_after is not None:
+                    delay = max(delay, float(retry_after))
+            except (ValueError, TypeError):
+                pass
+        await asyncio.sleep(min(delay, 60.0))
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("Telegram request failed without a response")
 
 async def get_job_status(job_id: int) -> str | None:
     async with database.connection() as conn:
@@ -215,7 +262,10 @@ async def sync_job_counts(job_id: int, final_status: str | None = None):
 
 async def process_job(job):
     job_id = job["id"]
-    message_text = f"✉️ Вам пришло анонимное сообщение:\n\n{job['message']}"
+    message_text = (
+        "✉️ Вам пришло анонимное сообщение:\n\n"
+        f"{html.escape(str(job['message']), quote=False)}"
+    )
     keyboard = {
         "inline_keyboard": [
             [{"text": "✍️ Ответить", "callback_data": "reply_anon"}],
@@ -249,14 +299,11 @@ async def process_job(job):
                 if await get_job_status(job_id) != "running":
                     break
                 try:
-                    response = await client.post(
-                        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                        json={
-                            "chat_id": user_id,
-                            "text": message_text,
-                            "parse_mode": "HTML",
-                            "reply_markup": keyboard,
-                        },
+                    response = await send_telegram_message(
+                        client,
+                        user_id,
+                        message_text,
+                        keyboard,
                     )
                     if response.status_code == 200:
                         await record_recipient_result(job_id, user_id, "sent")

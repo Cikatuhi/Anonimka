@@ -1137,7 +1137,13 @@ async def send_broadcast(request: Request, message: str = Form(...)):
                 await conn.execute(
                     """
                     INSERT INTO broadcast_job_recipients (job_id, user_id)
-                    SELECT $1, telegram_id FROM users
+                    SELECT $1, users.telegram_id
+                    FROM users
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM unsubscribed_users
+                        WHERE unsubscribed_users.telegram_id = users.telegram_id
+                    )
                     ON CONFLICT (job_id, user_id) DO NOTHING
                     """,
                     job_id,
