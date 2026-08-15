@@ -137,6 +137,72 @@ class CloudPaymentsClient:
         except Exception as e:
             logger.error("Error loading CloudPayments transactions: %s", e)
             return {"success": False, "error": str(e)}
+
+    async def list_payments_period(
+        self,
+        created_date_gte: str,
+        created_date_lte: str,
+        page_number: int = 1,
+        statuses: Optional[list[str]] = None,
+    ) -> Dict[str, Any]:
+        """Return CloudPayments transactions for an arbitrary period.
+
+        The v2 endpoint returns up to 100 transactions per page and includes
+        all statuses by default, including successful and failed operations.
+        """
+        url = f"{self.base_url}/v2/payments/list"
+        payload = {
+            "PageNumber": max(1, page_number),
+            "CreatedDateGte": created_date_gte,
+            "CreatedDateLte": created_date_lte,
+            "TimeZone": "MSK",
+        }
+        if statuses:
+            payload["Statuses"] = statuses
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers={
+                        "Authorization": f"Basic {self.auth}",
+                        "Content-Type": "application/json",
+                    },
+                )
+
+            if response.status_code != 200:
+                logger.error(
+                    "CloudPayments v2 payments/list HTTP error: status=%s",
+                    response.status_code,
+                )
+                return {
+                    "success": False,
+                    "error": f"CloudPayments HTTP {response.status_code}",
+                }
+
+            data = response.json()
+            if not data.get("Success"):
+                return {
+                    "success": False,
+                    "error": data.get("Message") or "CloudPayments не вернул список транзакций",
+                }
+
+            model = data.get("Model") or []
+            if isinstance(model, dict):
+                model = model.get("Payments") or model.get("Items") or []
+
+            payments = model if isinstance(model, list) else []
+            return {
+                "success": True,
+                "payments": payments,
+                "page": max(1, page_number),
+                "count": len(payments),
+                "has_more": len(payments) >= 100,
+            }
+        except Exception as e:
+            logger.error("Error loading CloudPayments transactions for period: %s", e)
+            return {"success": False, "error": str(e)}
     
     async def create_subscription(self,
                                   token: str,
