@@ -121,6 +121,16 @@ async def _ensure_broadcast_schema(conn):
             PRIMARY KEY (job_id, user_id)
         )
     """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS service_heartbeats (
+            service TEXT PRIMARY KEY,
+            heartbeat_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_service_heartbeats_at
+        ON service_heartbeats (heartbeat_at)
+    """)
     # Recipient history must survive moving a blocked user out of ``users``.
     # Older installations may have created this foreign key before the audit
     # table was introduced, so remove it idempotently during migration.
