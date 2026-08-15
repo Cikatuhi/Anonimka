@@ -21,6 +21,38 @@ ADMINS = {
     "glavskamer": "AK113689avip$top",
 }
 
+
+async def ensure_admin_indexes() -> None:
+    """Create indexes used by admin list pages when they are missing.
+
+    The migration is idempotent and tolerates optional tables/columns from
+    older installations, so the panel can start while the schema is upgraded.
+    """
+    statements = (
+        "CREATE INDEX IF NOT EXISTS idx_users_registered_at ON users (registered_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages (created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages (sender_id)",
+        "CREATE INDEX IF NOT EXISTS idx_messages_recipient_id ON messages (recipient_id)",
+        "CREATE INDEX IF NOT EXISTS idx_subscriptions_status_created_at ON subscriptions (status, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_subscriptions_user_created_at ON subscriptions (user_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_payment_events_status_created_at ON payment_events (status, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_payment_events_user_created_at ON payment_events (user_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_status_created_at ON broadcast_jobs (status, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_blocked_users_blocked_at ON blocked_users (blocked_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_unsubscribed_users_unsubscribed_at ON unsubscribed_users (unsubscribed_at DESC)",
+    )
+    conn = await database.get_conn()
+    try:
+        for statement in statements:
+            try:
+                await conn.execute(statement)
+            except Exception as exc:
+                # Older installations may not have every optional table/column.
+                print(f"⚠️ Не удалось создать индекс админки: {exc}", flush=True)
+    finally:
+        await database.release_conn(conn)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🚀 Инициализация БД...", flush=True)
