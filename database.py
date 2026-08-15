@@ -72,6 +72,89 @@ async def get_active_subscriptions_count():
     finally:
         await release_conn(conn)
 
+
+async def _ensure_broadcast_schema(conn):
+    """Create/migrate the broadcast tables used by the worker.
+
+    The migration is idempotent and also backfills recipients for jobs created
+    by older versions that stored the audience in ``user_ids_json``.
+    """
+    # The admin panel and worker can start before the bot process on a fresh
+    # installation.  Ensure the legacy parent table exists before applying
+    # additive migrations or creating the recipient foreign key.
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS broadcast_jobs (
+            id SERIAL PRIMARY KEY,
+            message TEXT NOT NULL,
+            total_users INT DEFAULT 0,
+            sent_users INT DEFAULT 0,
+            failed_users INT DEFAULT 0,
+            blocked_users INT DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            progress FLOAT DEFAULT 0,
+            user_ids_json JSONB,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            started_at TIMESTAMP,
+            paused_at TIMESTAMP,
+            finished_at TIMESTAMP,
+            cpu_usage FLOAT DEFAULT 0,
+            memory_usage FLOAT DEFAULT 0,
+            task_id TEXT
+        )
+    """)
+    await conn.execute("ALTER TABLE broadcast_jobs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMP")
+    await conn.execute("ALTER TABLE broadcast_jobs ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP")
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_heartbeat
+        ON broadcast_jobs (status, heartbeat_at)
+    """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS broadcast_job_recipients (
+            job_id INTEGER NOT NULL REFERENCES broadcast_jobs(id) ON DELETE CASCADE,
+            user_id BIGINT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            error_code TEXT,
+            error_message TEXT,
+            sent_at TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (job_id, user_id)
+        )
+    """)
+    # Recipient history must survive moving a blocked user out of ``users``.
+    # Older installations may have created this foreign key before the audit
+    # table was introduced, so remove it idempotently during migration.
+    await conn.execute("""
+        ALTER TABLE broadcast_job_recipients
+        DROP CONSTRAINT IF EXISTS broadcast_job_recipients_user_id_fkey
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_broadcast_job_recipients_pending
+        ON broadcast_job_recipients (job_id, status, user_id)
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_broadcast_job_recipients_lease
+        ON broadcast_job_recipients (status, updated_at)
+    """)
+    await conn.execute("""
+        INSERT INTO broadcast_job_recipients (job_id, user_id)
+        SELECT jobs.id, recipient.user_id::BIGINT
+        FROM broadcast_jobs AS jobs
+        CROSS JOIN LATERAL jsonb_array_elements_text(
+            COALESCE(jobs.user_ids_json, '[]'::jsonb)
+        ) AS recipient(user_id)
+        ON CONFLICT (job_id, user_id) DO NOTHING
+    """)
+
+
+async def ensure_broadcast_schema():
+    """Run the broadcast migration from processes that do not call init_db."""
+    conn = await get_conn()
+    try:
+        await _ensure_broadcast_schema(conn)
+    finally:
+        await release_conn(conn)
+
 # ============================================
 # ОСТАЛЬНЫЕ ФУНКЦИИ (ТЕ ЖЕ)
 # ============================================
@@ -143,6 +226,8 @@ async def init_db():
                 task_id TEXT
             )
         """)
+
+        await _ensure_broadcast_schema(conn)
         
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS unsubscribed_users (

@@ -1,43 +1,61 @@
-import os
-import sys
-import json
 import asyncio
+import os
+
 import httpx
-import psutil
-from datetime import datetime
-import database
 from dotenv import load_dotenv
-from time_utils import now_msk
+
+import database
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+BATCH_SIZE = 50
+STALE_AFTER_MINUTES = 15
 
-async def get_job_status(job_id: int) -> str:
-    conn = await database.get_conn()
-    try:
-        row = await conn.fetchrow("SELECT status FROM broadcast_jobs WHERE id = $1", job_id)
-        return row['status'] if row else None
-    finally:
-        await database.release_conn(conn)
+async def get_job_status(job_id: int) -> str | None:
+    async with database.connection() as conn:
+        return await conn.fetchval(
+            "SELECT status FROM broadcast_jobs WHERE id = $1",
+            job_id,
+        )
 
-async def update_job_status(job_id, status, **kwargs):
-    conn = await database.get_conn()
-    try:
-        fields = ["status = $1"]
-        values = [status]
-        for key, val in kwargs.items():
-            fields.append(f"{key} = ${len(values)+1}")
-            values.append(val)
-        values.append(job_id)
-        query = f"UPDATE broadcast_jobs SET {', '.join(fields)} WHERE id = ${len(values)}"
-        await conn.execute(query, *values)
-    finally:
-        await database.release_conn(conn)
+
+async def recover_stale_work() -> None:
+    """Make jobs abandoned by a crashed worker available again.
+
+    Recipient rows are the idempotency barrier: already sent rows remain sent,
+    while rows left in ``processing`` are returned to ``pending`` after the
+    lease expires.
+    """
+    async with database.connection() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                UPDATE broadcast_jobs
+                SET status = 'pending', started_at = NULL, heartbeat_at = NULL
+                WHERE status = 'running'
+                  AND COALESCE(heartbeat_at, started_at) <
+                      NOW() - ($1 * INTERVAL '1 minute')
+                """,
+                STALE_AFTER_MINUTES,
+            )
+            await conn.execute(
+                """
+                UPDATE broadcast_job_recipients
+                SET status = 'pending', updated_at = NOW()
+                FROM broadcast_jobs
+                WHERE broadcast_jobs.id = broadcast_job_recipients.job_id
+                  AND broadcast_jobs.status IN ('running', 'pending', 'paused')
+                  AND broadcast_job_recipients.status = 'processing'
+                  AND updated_at <
+                      NOW() - ($1 * INTERVAL '1 minute')
+                """,
+                STALE_AFTER_MINUTES,
+            )
+
 
 async def claim_next_job():
-    """Atomically claim the oldest pending job for this worker."""
-    conn = await database.get_conn()
-    try:
+    """Atomically claim one pending job, even with multiple worker processes."""
+    async with database.connection() as conn:
         async with conn.transaction():
             return await conn.fetchrow(
                 """
@@ -51,136 +69,246 @@ async def claim_next_job():
                 )
                 UPDATE broadcast_jobs AS jobs
                 SET status = 'running',
-                    started_at = NOW()
+                    started_at = COALESCE(jobs.started_at, NOW()),
+                    heartbeat_at = NOW()
                 FROM next_job
                 WHERE jobs.id = next_job.id
                 RETURNING jobs.*
                 """
             )
-    finally:
-        await database.release_conn(conn)
+
+
+async def claim_recipient_batch(job_id: int, limit: int = BATCH_SIZE):
+    """Lease a bounded batch of pending recipients for this job."""
+    async with database.connection() as conn:
+        async with conn.transaction():
+            return await conn.fetch(
+                """
+                WITH picked AS (
+                    SELECT job_id, user_id
+                    FROM broadcast_job_recipients
+                    WHERE job_id = $1 AND status = 'pending'
+                    ORDER BY user_id
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT $2
+                )
+                UPDATE broadcast_job_recipients AS recipients
+                SET status = 'processing',
+                    attempts = recipients.attempts + 1,
+                    updated_at = NOW()
+                FROM picked
+                WHERE recipients.job_id = picked.job_id
+                  AND recipients.user_id = picked.user_id
+                RETURNING recipients.user_id
+                """,
+                job_id,
+                limit,
+            )
+
+
+async def record_recipient_result(
+    job_id: int,
+    user_id: int,
+    status: str,
+    error_code: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    async with database.connection() as conn:
+        await conn.execute(
+            """
+            UPDATE broadcast_job_recipients
+            SET status = $3,
+                error_code = $4,
+                error_message = $5,
+                sent_at = CASE WHEN $3 = 'sent' THEN NOW() ELSE sent_at END,
+                updated_at = NOW()
+            WHERE job_id = $1 AND user_id = $2
+            """,
+            job_id,
+            user_id,
+            status,
+            error_code,
+            (error_message or "")[:500] or None,
+        )
+        await conn.execute(
+            "UPDATE broadcast_jobs SET heartbeat_at = NOW() WHERE id = $1 AND status = 'running'",
+            job_id,
+        )
+
+
+async def release_processing(job_id: int, status: str = "pending") -> None:
+    """Release a leased batch when an admin pauses or archives a job."""
+    async with database.connection() as conn:
+        await conn.execute(
+            """
+            UPDATE broadcast_job_recipients
+            SET status = $2, updated_at = NOW()
+            WHERE job_id = $1 AND status = 'processing'
+            """,
+            job_id,
+            status,
+        )
+
+
+async def sync_job_counts(job_id: int, final_status: str | None = None):
+    """Recalculate counters from recipient rows so restarts cannot lose progress."""
+    async with database.connection() as conn:
+        stats = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE status = 'sent') AS sent,
+                COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+                COUNT(*) FILTER (WHERE status = 'blocked') AS blocked,
+                COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+                COUNT(*) FILTER (WHERE status = 'processing') AS processing,
+                COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled
+            FROM broadcast_job_recipients
+            WHERE job_id = $1
+            """,
+            job_id,
+        )
+        job_total = await conn.fetchval(
+            "SELECT total_users FROM broadcast_jobs WHERE id = $1", job_id
+        )
+        total = max(int(job_total or 0), int(stats["total"] or 0))
+        processed = (
+            int(stats["sent"] or 0)
+            + int(stats["failed"] or 0)
+            + int(stats["blocked"] or 0)
+            + int(stats["cancelled"] or 0)
+        )
+        progress = 100 if total and processed >= total else (processed / total * 100 if total else 0)
+        await conn.execute(
+            """
+            UPDATE broadcast_jobs
+            SET total_users = $2,
+                sent_users = $3,
+                failed_users = $4,
+                blocked_users = $5,
+                progress = $6,
+                heartbeat_at = CASE
+                    WHEN status = 'running' THEN NOW()
+                    ELSE heartbeat_at
+                END
+            WHERE id = $1
+            """,
+            job_id,
+            total,
+            stats["sent"],
+            stats["failed"],
+            stats["blocked"],
+            progress,
+        )
+        if final_status:
+            await conn.execute(
+                """
+                UPDATE broadcast_jobs
+                SET status = $2, finished_at = NOW(), heartbeat_at = NULL
+                WHERE id = $1 AND status = 'running'
+                """,
+                job_id,
+                final_status,
+            )
+        return stats
+
 
 async def process_job(job):
-    job_id = job['id']
-    
-    
-    user_ids = json.loads(job['user_ids_json'])
-    message = job['message']
-    
-    total = len(user_ids)
-    results = {'sent': 0, 'failed': 0, 'blocked': 0}
-    
+    job_id = job["id"]
+    message_text = f"✉️ Вам пришло анонимное сообщение:\n\n{job['message']}"
     keyboard = {
         "inline_keyboard": [
             [{"text": "✍️ Ответить", "callback_data": "reply_anon"}],
-            [{"text": "👀 Узнать кто это", "callback_data": "who_is_it", "style": "primary"}]
+            [{"text": "👀 Узнать кто это", "callback_data": "who_is_it", "style": "primary"}],
         ]
     }
-    message_text = f"✉️ Вам пришло анонимное сообщение:\n\n{message}"
-    
+
     async with httpx.AsyncClient(timeout=30.0) as client:
-        for i, user_id in enumerate(user_ids):
-            if i % 10 == 0:
-                current_status = await get_job_status(job_id)
-                if current_status == 'paused':
-                    print(f"⏸️ Задача {job_id} поставлена на паузу. Остановка на {i} сообщении...")
-                    await update_job_status(
-                        job_id, 'paused',
-                        sent_users=results['sent'],
-                        failed_users=results['failed'],
-                        blocked_users=results['blocked'],
-                        progress=((i) / total) * 100 if total > 0 else 0
-                    )
+        while True:
+            current_status = await get_job_status(job_id)
+            if current_status in {"paused", "cancelled", "archived"}:
+                await release_processing(job_id, "pending" if current_status == "paused" else "cancelled")
+                await sync_job_counts(job_id)
+                print(f"⏸️ Задача {job_id} остановлена со статусом {current_status}")
+                return
+            if current_status != "running":
+                return
+
+            batch = await claim_recipient_batch(job_id)
+            if not batch:
+                stats = await sync_job_counts(job_id)
+                if not stats["pending"] and not stats["processing"]:
+                    await sync_job_counts(job_id, final_status="completed")
+                    print(f"✅ Задача {job_id} завершена")
                     return
-                elif current_status == 'cancelled':
-                    print(f"⛔ Задача {job_id} отменена. Остановка...")
-                    await update_job_status(
-                        job_id, 'cancelled',
-                        sent_users=results['sent'],
-                        failed_users=results['failed'],
-                        blocked_users=results['blocked'],
-                        progress=((i) / total) * 100 if total > 0 else 0
+                await asyncio.sleep(1)
+                continue
+
+            for row in batch:
+                user_id = row["user_id"]
+                if await get_job_status(job_id) != "running":
+                    break
+                try:
+                    response = await client.post(
+                        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                        json={
+                            "chat_id": user_id,
+                            "text": message_text,
+                            "parse_mode": "HTML",
+                            "reply_markup": keyboard,
+                        },
                     )
-                    return
-            
-            if i % 10 == 0 and i > 0:
-                cpu = psutil.cpu_percent()
-                if cpu > 80:
-                    await update_job_status(job_id, 'paused', paused_at=now_msk().replace(tzinfo=None))
-                    while psutil.cpu_percent() > 60:
-                        await asyncio.sleep(5)
-                    current_status = await get_job_status(job_id)
-                    if current_status == 'cancelled':
-                        print(f"⛔ Задача {job_id} отменена во время паузы CPU. Остановка...")
-                        return
-                    await update_job_status(job_id, 'running')
-            
-            try:
-                payload = {
-                    "chat_id": user_id,
-                    "text": message_text,
-                    "parse_mode": "HTML",
-                    "reply_markup": keyboard
-                }
-                response = await client.post(
-                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                    json=payload
-                )
-                if response.status_code == 200:
-                    results['sent'] += 1
-                else:
-                    error_text = str(response.json()).lower()
-                    if "bot was blocked" in error_text or "forbidden" in error_text:
-                        results['blocked'] += 1
+                    if response.status_code == 200:
+                        await record_recipient_result(job_id, user_id, "sent")
+                        continue
+
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = {}
+                    description = str(payload.get("description") or response.text)
+                    lowered = description.lower()
+                    if response.status_code == 403 or "bot was blocked" in lowered or "forbidden" in lowered:
+                        result_status = "blocked"
                         user_data = await database.get_user(user_id)
                         if user_data:
                             await database.add_blocked_user(
                                 user_id,
-                                user_data.get('username', ''),
-                                user_data.get('first_name', '')
+                                user_data.get("username", ""),
+                                user_data.get("first_name", ""),
                             )
                     else:
-                        results['failed'] += 1
-            except Exception:
-                results['failed'] += 1
-            
-            if i % 5 == 0 or i == total - 1:
-                progress = ((i + 1) / total) * 100 if total > 0 else 0
-                await update_job_status(
-                    job_id, 'running',
-                    sent_users=results['sent'],
-                    failed_users=results['failed'],
-                    blocked_users=results['blocked'],
-                    progress=progress
-                )
-            
-            if i % 30 == 0:
-                await asyncio.sleep(0.1)
-    
-    await update_job_status(
-        job_id, 'completed',
-        sent_users=results['sent'],
-        failed_users=results['failed'],
-        blocked_users=results['blocked'],
-        progress=100,
-        finished_at=now_msk().replace(tzinfo=None)
-    )
-    print(f"✅ Задача {job_id} завершена")
+                        result_status = "failed"
+                    await record_recipient_result(
+                        job_id,
+                        user_id,
+                        result_status,
+                        str(response.status_code),
+                        description,
+                    )
+                except Exception as exc:
+                    await record_recipient_result(job_id, user_id, "failed", "exception", str(exc))
+
+            await sync_job_counts(job_id)
+
 
 async def main_loop():
+    await database.ensure_broadcast_schema()
+    await recover_stale_work()
     print("🚀 Воркер запущен, ждём задачи...")
     while True:
         try:
+            await recover_stale_work()
             job = await claim_next_job()
-            
             if job:
                 print(f"📨 Найдена задача {job['id']}, начинаем обработку...")
                 await process_job(job)
             else:
                 await asyncio.sleep(5)
-        except Exception as e:
-            print(f"❌ Ошибка: {e}")
+        except Exception as exc:
+            print(f"❌ Ошибка worker: {exc}")
             await asyncio.sleep(5)
+
 
 if __name__ == "__main__":
     asyncio.run(main_loop())

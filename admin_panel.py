@@ -1,6 +1,5 @@
 import os
 import uuid
-import json
 import psutil
 import re
 import aiohttp
@@ -26,6 +25,8 @@ ADMINS = {
 async def lifespan(app: FastAPI):
     print("🚀 Инициализация БД...", flush=True)
     await database.init_pool()
+    await database.ensure_broadcast_schema()
+    await ensure_admin_indexes()
     print("✅ БД готова", flush=True)
     try:
         yield
@@ -917,7 +918,8 @@ async def broadcast_page(request: Request):
             'paused': '⏸️ Приостановлено',
             'completed': '✅ Завершено',
             'failed': '❌ Ошибка',
-            'cancelled': '⛔ Остановлена'
+            'cancelled': '⛔ Остановлена',
+            'archived': '📦 Архив'
         }
         status_label = status_labels.get(status_text, status_text)
         status_class = f"status-{status_text}"
@@ -946,8 +948,9 @@ async def broadcast_page(request: Request):
                         style="display: {'inline-flex' if status_text in ('running', 'pending') else 'none'};">
                     Поставить на паузу
                 </button>
-                <button onclick="deleteBroadcast()" id="deleteBtn" class="button-danger">
-                    Удалить задачу
+                <button onclick="archiveBroadcast()" id="archiveBtn" class="button-danger"
+                        style="display: {'none' if status_text == 'archived' else 'inline-flex'};">
+                    Архивировать задачу
                 </button>
                 <a href="/broadcast" class="glow-button">Обновить</a>
                 <a href="/broadcast/list" class="glow-button">Открыть историю</a>
@@ -977,7 +980,8 @@ async def broadcast_page(request: Request):
                             'paused': '⏸️ Приостановлено',
                             'completed': '✅ Завершено',
                             'failed': '❌ Ошибка',
-                            'cancelled': '⛔ Остановлена'
+                            'cancelled': '⛔ Остановлена',
+                            'archived': '📦 Архив'
                         }};
                         document.querySelector('.status-value').textContent = statusLabel[data.status] || data.status;
                         document.querySelector('.status-value').className = 'status-value status-' + data.status;
@@ -1019,29 +1023,29 @@ async def broadcast_page(request: Request):
                 }}
             }}
 
-            async function deleteBroadcast() {{
-                if (!confirm('🗑️ ВЫ УВЕРЕНЫ? Рассылка #${{jobId}} будет полностью удалена из БД!')) return;
-                
-                const btn = document.getElementById('deleteBtn');
-                btn.textContent = '⏳ Удаление...';
+            async function archiveBroadcast() {{
+                if (!confirm('📦 Переместить рассылку #${{jobId}} в архив? История сохранится.')) return;
+
+                const btn = document.getElementById('archiveBtn');
+                btn.textContent = '⏳ Архивация...';
                 btn.disabled = true;
-                
+
                 try {{
-                    const response = await fetch(`/broadcast/delete/${{jobId}}`, {{
+                    const response = await fetch(`/broadcast/archive/${{jobId}}`, {{
                         method: 'POST',
                         headers: {{ 'Content-Type': 'application/json' }}
                     }});
                     const data = await response.json();
                     if (data.success) {{
                         alert('✅ ' + data.message);
-                        window.location.href = '/broadcast';
+                        window.location.href = '/broadcast/list';
                     }} else {{
                         alert('❌ Ошибка: ' + data.error);
                     }}
                 }} catch (e) {{
                     alert('❌ Ошибка: ' + e.message);
                 }} finally {{
-                    btn.textContent = 'Удалить задачу';
+                    btn.textContent = 'Архивировать задачу';
                     btn.disabled = false;
                 }}
             }}
@@ -1086,24 +1090,41 @@ async def broadcast_page(request: Request):
 async def send_broadcast(request: Request, message: str = Form(...)):
     if not message or len(message.strip()) == 0:
         return RedirectResponse(url="/broadcast?error=empty", status_code=303)
-    
+
     try:
-        conn = await database.get_conn()
-        try:
-            rows = await conn.fetch("SELECT telegram_id FROM users")
-            user_ids = [row['telegram_id'] for row in rows]
-            
-            if not user_ids:
-                return RedirectResponse(url="/broadcast?error=no_users", status_code=303)
-            
-            await conn.execute("""
-                INSERT INTO broadcast_jobs (message, total_users, user_ids_json, status, created_at)
-                VALUES ($1, $2, $3::jsonb, 'pending', NOW())
-            """, message, len(user_ids), json.dumps(user_ids))
-        finally:
-            await database.release_conn(conn)
+        async with database.connection() as conn:
+            async with conn.transaction():
+                job_id = await conn.fetchval(
+                    """
+                    INSERT INTO broadcast_jobs (message, status, created_at)
+                    VALUES ($1, 'pending', NOW())
+                    RETURNING id
+                    """,
+                    message.strip(),
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO broadcast_job_recipients (job_id, user_id)
+                    SELECT $1, telegram_id FROM users
+                    ON CONFLICT (job_id, user_id) DO NOTHING
+                    """,
+                    job_id,
+                )
+                total_users = await conn.fetchval(
+                    "SELECT COUNT(*) FROM broadcast_job_recipients WHERE job_id = $1",
+                    job_id,
+                )
+                if not total_users:
+                    await conn.execute("DELETE FROM broadcast_jobs WHERE id = $1", job_id)
+                    return RedirectResponse(url="/broadcast?error=no_users", status_code=303)
+                await conn.execute(
+                    "UPDATE broadcast_jobs SET total_users = $2 WHERE id = $1",
+                    job_id,
+                    total_users,
+                )
     except Exception as e:
         print(f"❌ Ошибка отправки рассылки: {e}")
+        return RedirectResponse(url="/broadcast?error=send_failed", status_code=303)
     
     return RedirectResponse(url="/broadcast?success=1", status_code=303)
 
@@ -1143,23 +1164,32 @@ async def get_job_status(job_id: int):
 @app.post("/broadcast/pause/{job_id}")
 async def pause_broadcast(job_id: int):
     async with database.connection() as conn:
-        job = await conn.fetchrow("SELECT * FROM broadcast_jobs WHERE id = $1", job_id)
-        if not job:
-            return JSONResponse(
-                content={"success": False, "error": "Задача не найдена"},
-                status_code=404
+        async with conn.transaction():
+            job = await conn.fetchrow("SELECT status FROM broadcast_jobs WHERE id = $1 FOR UPDATE", job_id)
+            if not job:
+                return JSONResponse(
+                    content={"success": False, "error": "Задача не найдена"},
+                    status_code=404
+                )
+
+            if job['status'] not in ('running', 'pending'):
+                return JSONResponse(
+                    content={"success": False, "error": f"Нельзя поставить на паузу задачу со статусом {job['status']}"},
+                    status_code=400
+                )
+
+            await conn.execute(
+                "UPDATE broadcast_jobs SET status = 'paused', paused_at = NOW() WHERE id = $1",
+                job_id
             )
-        
-        if job['status'] not in ('running', 'pending'):
-            return JSONResponse(
-                content={"success": False, "error": f"Нельзя поставить на паузу задачу со статусом {job['status']}"},
-                status_code=400
+            await conn.execute(
+                """
+                UPDATE broadcast_job_recipients
+                SET status = 'pending', updated_at = NOW()
+                WHERE job_id = $1 AND status = 'processing'
+                """,
+                job_id,
             )
-        
-        await conn.execute(
-            "UPDATE broadcast_jobs SET status = 'paused', paused_at = NOW() WHERE id = $1",
-            job_id
-        )
         
         return JSONResponse(
             content={
@@ -1169,22 +1199,38 @@ async def pause_broadcast(job_id: int):
             }
         )
 
-@app.post("/broadcast/delete/{job_id}")
-async def delete_broadcast(job_id: int):
+@app.post("/broadcast/archive/{job_id}")
+async def archive_broadcast(job_id: int):
     async with database.connection() as conn:
-        job = await conn.fetchrow("SELECT * FROM broadcast_jobs WHERE id = $1", job_id)
-        if not job:
-            return JSONResponse(
-                content={"success": False, "error": "Задача не найдена"},
-                status_code=404
+        async with conn.transaction():
+            job = await conn.fetchrow("SELECT id FROM broadcast_jobs WHERE id = $1 FOR UPDATE", job_id)
+            if not job:
+                return JSONResponse(
+                    content={"success": False, "error": "Задача не найдена"},
+                    status_code=404
+                )
+
+            await conn.execute(
+                """
+                UPDATE broadcast_jobs
+                SET status = 'archived', archived_at = NOW(), heartbeat_at = NULL
+                WHERE id = $1
+                """,
+                job_id,
             )
-        
-        await conn.execute("DELETE FROM broadcast_jobs WHERE id = $1", job_id)
-        
+            await conn.execute(
+                """
+                UPDATE broadcast_job_recipients
+                SET status = 'cancelled', updated_at = NOW()
+                WHERE job_id = $1 AND status = 'processing'
+                """,
+                job_id,
+            )
+
         return JSONResponse(
             content={
                 "success": True,
-                "message": f"Рассылка #{job_id} удалена",
+                "message": f"Рассылка #{job_id} перемещена в архив",
                 "job_id": job_id
             }
         )
@@ -1277,7 +1323,8 @@ async def broadcast_list(request: Request):
                 'paused': '#ffaa44',
                 'completed': '#44ff88',
                 'failed': '#ff4488',
-                'cancelled': '#ff6644'
+                'cancelled': '#ff6644',
+                'archived': '#708090'
             }.get(row['status'], '#8899aa')
             
             status_labels = {
@@ -1286,7 +1333,8 @@ async def broadcast_list(request: Request):
                 'paused': '⏸️ Пауза',
                 'completed': '✅ Завершено',
                 'failed': '❌ Ошибка',
-                'cancelled': '⛔ Остановлена'
+                'cancelled': '⛔ Остановлена',
+                'archived': '📦 Архив'
             }.get(row['status'], row['status'])
             
             html += f'''
