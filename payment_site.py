@@ -445,7 +445,7 @@ tr:hover { background: #f8f9fa; }
 
 
 @app.get("/pay/{user_id}", response_class=HTMLResponse)
-async def payment_page(user_id: int):
+async def payment_page(user_id: int, request: Request):
     conn = await database.get_conn()
     try:
         row = await conn.fetchrow(
@@ -459,54 +459,183 @@ async def payment_page(user_id: int):
     
     show_checkboxes = await get_show_checkboxes()
     
-    if not show_checkboxes:
+    # The consent screen intentionally has its own URL state.  This means a
+    # user can complete the checkboxes once and then refresh the payment page
+    # without seeing the consent overlay again.
+    checkout_requested = request.query_params.get("checkout") == "1"
+
+    if not show_checkboxes or checkout_requested:
         return HTMLResponse(content=f"""
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-            <title>Anonimka — оплата</title>
+            <title>Anonimka — оформить доступ</title>
             <script src="https://widget.cloudpayments.ru/bundles/paymentblocks.js"></script>
             <style>
+                :root {{
+                    --ink: #172033;
+                    --muted: #667085;
+                    --line: #e8ecf3;
+                    --accent: #7057e8;
+                    --accent-dark: #5942d1;
+                }}
                 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
                 body {{
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-                    background: #f0f2f5;
-                    color: #1a1a2e;
+                    background: #f5f7fb;
+                    color: var(--ink);
+                    min-height: 100vh;
+                    padding: 28px 16px 40px;
+                }}
+                .page {{
+                    max-width: 560px;
+                    margin: 0 auto;
+                }}
+                .brand {{
                     display: flex;
                     align-items: center;
-                    justify-content: center;
-                    min-height: 100vh;
-                    padding: 16px;
+                    gap: 10px;
+                    color: var(--muted);
+                    font-size: 13px;
+                    font-weight: 600;
+                    letter-spacing: .02em;
+                    margin: 0 4px 18px;
+                }}
+                .brand-mark {{
+                    width: 32px;
+                    height: 32px;
+                    display: grid;
+                    place-items: center;
+                    border-radius: 10px;
+                    color: #fff;
+                    background: linear-gradient(135deg, #8f7af6, var(--accent));
+                    box-shadow: 0 6px 16px rgba(112, 87, 232, .24);
+                    font-size: 17px;
                 }}
                 .card {{
                     background: #ffffff;
-                    border-radius: 20px;
-                    padding: 32px 24px 28px;
-                    max-width: 480px;
-                    width: 100%;
-                    box-shadow: 0 4px 24px rgba(0,0,0,0.08);
-                    border: 1px solid #e8ecf1;
-                    text-align: center;
+                    border: 1px solid var(--line);
+                    border-radius: 24px;
+                    padding: 30px 28px 26px;
+                    box-shadow: 0 16px 44px rgba(23, 32, 51, .08);
+                }}
+                .eyebrow {{
+                    color: var(--accent);
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: .08em;
+                    text-transform: uppercase;
+                    margin-bottom: 10px;
+                }}
+                h1 {{
+                    font-size: clamp(25px, 5vw, 32px);
+                    line-height: 1.16;
+                    letter-spacing: -.04em;
+                    margin-bottom: 10px;
+                }}
+                .lead {{
+                    color: var(--muted);
+                    font-size: 15px;
+                    line-height: 1.55;
+                    margin-bottom: 22px;
+                }}
+                .benefits {{
+                    display: grid;
+                    gap: 10px;
+                    padding: 16px;
+                    border: 1px solid #eeeafd;
+                    border-radius: 16px;
+                    background: #faf9ff;
+                    margin-bottom: 18px;
+                }}
+                .benefit {{
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 10px;
+                    color: #303b50;
+                    font-size: 14px;
+                    line-height: 1.4;
+                }}
+                .benefit-icon {{
+                    color: var(--accent);
+                    font-size: 17px;
+                    line-height: 1.1;
+                }}
+                .price {{
+                    display: flex;
+                    align-items: baseline;
+                    justify-content: space-between;
+                    gap: 12px;
+                    padding: 15px 16px;
+                    border: 1px solid var(--line);
+                    border-radius: 14px;
+                    margin-bottom: 18px;
+                }}
+                .price-label {{ color: var(--muted); font-size: 14px; }}
+                .price-value {{ color: var(--ink); font-size: 22px; font-weight: 800; }}
+                .price-value span {{ color: var(--muted); font-size: 13px; font-weight: 500; }}
+                .section-title {{ font-size: 16px; margin: 18px 0 8px; }}
+                .terms {{
+                    color: var(--muted);
+                    font-size: 12px;
+                    line-height: 1.55;
+                    margin: 17px 2px 0;
+                }}
+                .terms a, .footer a {{ color: var(--accent-dark); text-decoration: none; font-weight: 600; }}
+                .security {{
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 9px;
+                    color: #667085;
+                    font-size: 12px;
+                    line-height: 1.45;
+                    padding: 13px 14px;
+                    background: #f8fafc;
+                    border-radius: 12px;
+                    margin-top: 16px;
                 }}
                 #widget-container {{
-                    min-height: 350px;
+                    min-height: 320px;
+                    margin-top: 4px;
+                }}
+                .footer {{
+                    text-align: center;
+                    color: #98a2b3;
+                    font-size: 12px;
+                    line-height: 1.5;
+                    margin: 16px 8px 0;
                 }}
                 @media (max-width: 480px) {{
-                    .card {{ padding: 24px 16px; }}
+                    body {{ padding: 18px 12px 28px; }}
+                    .card {{ padding: 24px 17px 21px; border-radius: 20px; }}
                     #widget-container {{ min-height: 280px; }}
                 }}
             </style>
         </head>
         <body>
-            <div class="card">
-                <div id="widget-container">
-                    <div style="text-align:center; color:#9ca3af; padding:20px;">
-                        Загрузка формы оплаты...
+            <main class="page">
+                <div class="brand"><span class="brand-mark">✉</span> Анонимное сообщение</div>
+                <section class="card">
+                    <div class="eyebrow">Премиум-доступ · шаг 2 из 2</div>
+                    <h1>Узнайте, кто отправил вам анонимное сообщение</h1>
+                    <p class="lead">После оплаты бот откроет доступ к информации об отправителе выбранного сообщения.</p>
+                    <div class="benefits">
+                        <div class="benefit"><span class="benefit-icon">✓</span><span>Информация об отправителе в Telegram</span></div>
+                        <div class="benefit"><span class="benefit-icon">✓</span><span>Доступ активируется сразу после подтверждения платежа</span></div>
+                        <div class="benefit"><span class="benefit-icon">✓</span><span>Подписку можно отменить в любой момент</span></div>
                     </div>
-                </div>
-            </div>
+                    <div class="price"><span class="price-label">Пробный доступ</span><strong class="price-value">5 ₽ <span>за 1 день</span></strong></div>
+                    <h2 class="section-title">Оплата картой</h2>
+                    <div id="widget-container">
+                        <div style="text-align:center; color:#98a2b3; padding:20px;">Загрузка формы оплаты...</div>
+                    </div>
+                    <div class="security"><span>🔒</span><span>Данные карты обрабатывает CloudPayments. Мы не получаем и не храним реквизиты карты.</span></div>
+                    <p class="terms">Оформляя оплату, вы принимаете <a href="/doc1" target="_blank">условия использования</a>, <a href="/doc2" target="_blank">лицензию</a> и <a href="/doc3" target="_blank">условия платежей</a>. После пробного периода — 699 ₽ за 7 дней. Возможны списания 299 ₽ за 3 дня или 99 ₽ за 1 день.</p>
+                </section>
+                <div class="footer">Нужна помощь? Напишите в поддержку через бота.</div>
+            </main>
             <script>
                 const container = document.getElementById('widget-container');
                 container.innerHTML = '';
@@ -529,16 +658,16 @@ async def payment_page(user_id: int):
                     {{
                         appearance: {{
                             colors: {{
-                                primaryButtonColor: "#7c3aed",
-                                primaryHoverButtonColor: "#6d28d9",
+                                primaryButtonColor: "#7057e8",
+                                primaryHoverButtonColor: "#5942d1",
                                 primaryButtonTextColor: "#ffffff",
                                 primaryButtonHoverTextColor: "#ffffff",
-                                activeInputColor: "#7c3aed",
-                                inputBackground: "#f8f9fc",
-                                inputColor: "#1a1a2e",
-                                inputBorderColor: "#e8ecf1",
-                                titleColor: "#1a1a2e",
-                                textColor: "#374151",
+                                activeInputColor: "#7057e8",
+                                inputBackground: "#f8fafc",
+                                inputColor: "#172033",
+                                inputBorderColor: "#e8ecf3",
+                                titleColor: "#172033",
+                                textColor: "#303b50",
                                 errorColor: "#ef4444"
                             }},
                             borders: {{
@@ -669,6 +798,10 @@ async def payment_page(user_id: int):
                 cursor: pointer;
                 line-height: 1.5;
             }}
+            .popup .checkbox-item a {{
+                color: #5b43d6;
+                text-decoration: none;
+            }}
             
             .popup .btn-wrap {{
                 margin-top: 24px;
@@ -702,6 +835,11 @@ async def payment_page(user_id: int):
             }}
             .popup .btn.active:active {{
                 transform: scale(0.98);
+            }}
+            .popup .btn.loading {{
+                cursor: wait;
+                opacity: 1;
+                background: #5942d1;
             }}
             
             .popup .btn-sub {{
@@ -765,13 +903,13 @@ async def payment_page(user_id: int):
                     <div class="checkbox-item">
                         <input type="checkbox" id="policy_check" onchange="checkCheckboxes()">
                         <label for="policy_check">
-                            Вы даете согласие на обработку персональных данных, а также принимаете условия публичной оферты
+                            Я согласен на обработку персональных данных и принимаю <a href="/doc1" target="_blank">условия использования</a>
                         </label>
                     </div>
                     <div class="checkbox-item">
                         <input type="checkbox" id="terms_check" onchange="checkCheckboxes()">
                         <label for="terms_check">
-                            Принятие условий пробного периода - 5₽ за день, далее 699₽ раз в неделю. Возможно списание 299₽ за 3 дня или 99₽ за 1 день. Отключить подписку можно в любой момент
+                            Я принимаю условия подписки: 5 ₽ за 1 день, далее 699 ₽ за 7 дней. Возможны списания 299 ₽ за 3 дня или 99 ₽ за 1 день; отмена доступна в любой момент
                         </label>
                     </div>
                 </div>
@@ -779,8 +917,8 @@ async def payment_page(user_id: int):
                 <div id="popup-error" class="error-text">⚠️ Пожалуйста, примите все условия для продолжения</div>
 
                 <div class="btn-wrap">
-                    <button id="popupBtn" class="btn" onclick="closePopupAndStartPayment()" disabled>Получить Премиум</button>
-                    <div class="btn-sub">Отменить можно в любой момент.</div>
+                    <button id="popupBtn" class="btn" onclick="closePopupAndStartPayment()" disabled>Отметьте оба пункта</button>
+                    <div class="btn-sub">После второй галочки откроется защищённая форма оплаты.</div>
                 </div>
             </div>
         </div>
@@ -796,88 +934,44 @@ async def payment_page(user_id: int):
         </div>
 
         <script>
+            let redirectTimer = null;
+
             function checkCheckboxes() {{
                 const policyChecked = document.getElementById('policy_check').checked;
                 const termsChecked = document.getElementById('terms_check').checked;
                 const btn = document.getElementById('popupBtn');
                 const error = document.getElementById('popup-error');
-                
+
                 if (policyChecked && termsChecked) {{
                     btn.disabled = false;
                     btn.classList.add('active');
+                    btn.classList.add('loading');
+                    btn.textContent = 'Переходим к оплате…';
                     error.style.display = 'none';
+                    window.clearTimeout(redirectTimer);
+                    redirectTimer = window.setTimeout(goToCheckout, 280);
                 }} else {{
                     btn.disabled = true;
                     btn.classList.remove('active');
+                    btn.classList.remove('loading');
+                    btn.textContent = 'Отметьте оба пункта';
+                    window.clearTimeout(redirectTimer);
                 }}
             }}
 
-            function closePopupAndStartPayment() {{
+            function goToCheckout() {{
                 const policyChecked = document.getElementById('policy_check').checked;
                 const termsChecked = document.getElementById('terms_check').checked;
                 const error = document.getElementById('popup-error');
-                
+
                 if (!policyChecked || !termsChecked) {{
                     error.style.display = 'block';
                     return;
                 }}
-
-                document.getElementById('popupOverlay').style.display = 'none';
-                document.getElementById('main-content').classList.add('visible');
-
-                const container = document.getElementById('widget-container');
-                container.innerHTML = '';
-
-                const blocksApp = new cp.PaymentBlocks(
-                    {{
-                        publicTerminalId: "pk_cfc9c99ee447f06de34f6cd148a22",
-                        paymentSchema: 'Single',
-                        description: "Premium access for 1 day",
-                        amount: 5,
-                        currency: "RUB",
-                        language: "ru-RU",
-                        userInfo: {{
-                            accountId: "{user_id}"
-                        }},
-                        tokenize: true,
-                        email: "",
-                        emailBehavior: "Optional"
-                    }},
-                    {{
-                        appearance: {{
-                            colors: {{
-                                primaryButtonColor: "#7c3aed",
-                                primaryHoverButtonColor: "#6d28d9",
-                                primaryButtonTextColor: "#ffffff",
-                                primaryButtonHoverTextColor: "#ffffff",
-                                activeInputColor: "#7c3aed",
-                                inputBackground: "#f8f9fc",
-                                inputColor: "#1a1a2e",
-                                inputBorderColor: "#e8ecf1",
-                                titleColor: "#1a1a2e",
-                                textColor: "#374151",
-                                errorColor: "#ef4444"
-                            }},
-                            borders: {{
-                                radius: "12px"
-                            }}
-                        }},
-                        components: {{
-                            paymentButton: {{
-                                text: "💳 Оплатить 5 ₽",
-                                fontSize: "16px"
-                            }},
-                            paymentForm: {{
-                                labelFontSize: "13px",
-                                activeLabelFontSize: "13px",
-                                fontSize: "15px"
-                            }}
-                        }}
-                    }}
-                );
-
-                blocksApp.mount(container);
+                window.location.replace(window.location.pathname + '?checkout=1');
             }}
+
+            function closePopupAndStartPayment() {{ goToCheckout(); }}
         </script>
     </body>
     </html>
