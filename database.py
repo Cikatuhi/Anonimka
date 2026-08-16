@@ -1,10 +1,10 @@
 import asyncpg
-
 import json
 import os
 import secrets
 from dotenv import load_dotenv
-
+import asyncio
+import ssl
 from contextlib import asynccontextmanager
 import aiohttp
 
@@ -15,6 +15,8 @@ DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "default_db")
 DB_USER = os.getenv("DB_USER", "gen_user")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_SSL_CA = os.getenv("DB_SSL_CA")
+DB_SSL = ssl.create_default_context(cafile=DB_SSL_CA) if DB_SSL_CA else None
 
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
@@ -828,6 +830,7 @@ async def init_pool():
                     min_size=1,
                     max_size=10,
                     command_timeout=30,
+                    ssl=DB_SSL,
                 )
     return pool
 
