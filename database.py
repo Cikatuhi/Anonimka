@@ -1,4 +1,5 @@
 import asyncpg
+import json
 import os
 import secrets
 from dotenv import load_dotenv
@@ -163,6 +164,7 @@ async def ensure_broadcast_schema():
     try:
         await _ensure_broadcast_schema(conn)
         await _ensure_payment_link_visits_schema(conn)
+        await _ensure_unsubscribed_schema(conn)
     finally:
         await release_conn(conn)
 
@@ -184,6 +186,52 @@ async def _ensure_payment_link_visits_schema(conn):
         CREATE INDEX IF NOT EXISTS idx_payment_link_visits_last_visited_at
         ON payment_link_visits (last_visited_at DESC)
     """)
+
+
+async def _ensure_unsubscribed_schema(conn):
+    """Create and migrate the unsubscribe archive schema."""
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS unsubscribed_users (
+            telegram_id BIGINT PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            unsubscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reason TEXT DEFAULT 'manual',
+            card_token TEXT,
+            subscription_id TEXT,
+            subscription_record_id INTEGER,
+            subscription_plan TEXT,
+            subscription_start_date TIMESTAMP,
+            subscription_end_date TIMESTAMP,
+            subscription_status TEXT,
+            subscription_created_at TIMESTAMP,
+            subscription_next_retry_at TIMESTAMP WITH TIME ZONE,
+            subscription_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb
+        )
+    """)
+
+    # Add columns to installations created before the archive stored a
+    # complete subscription snapshot.  Every statement is idempotent.
+    await conn.execute("ALTER TABLE unsubscribed_users ADD COLUMN IF NOT EXISTS card_token TEXT")
+    await conn.execute("ALTER TABLE unsubscribed_users ADD COLUMN IF NOT EXISTS subscription_id TEXT")
+    await conn.execute("ALTER TABLE unsubscribed_users ADD COLUMN IF NOT EXISTS subscription_record_id INTEGER")
+    await conn.execute("ALTER TABLE unsubscribed_users ADD COLUMN IF NOT EXISTS subscription_plan TEXT")
+    await conn.execute("ALTER TABLE unsubscribed_users ADD COLUMN IF NOT EXISTS subscription_start_date TIMESTAMP")
+    await conn.execute("ALTER TABLE unsubscribed_users ADD COLUMN IF NOT EXISTS subscription_end_date TIMESTAMP")
+    await conn.execute("ALTER TABLE unsubscribed_users ADD COLUMN IF NOT EXISTS subscription_status TEXT")
+    await conn.execute("ALTER TABLE unsubscribed_users ADD COLUMN IF NOT EXISTS subscription_created_at TIMESTAMP")
+    await conn.execute("ALTER TABLE unsubscribed_users ADD COLUMN IF NOT EXISTS subscription_next_retry_at TIMESTAMP WITH TIME ZONE")
+    await conn.execute("ALTER TABLE unsubscribed_users ADD COLUMN IF NOT EXISTS subscription_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_unsubscribed_users_unsubscribed_at ON unsubscribed_users (unsubscribed_at DESC)")
+
+
+async def ensure_unsubscribed_schema():
+    """Run the unsubscribe archive migration from web processes."""
+    conn = await get_conn()
+    try:
+        await _ensure_unsubscribed_schema(conn)
+    finally:
+        await release_conn(conn)
 
 
 async def ensure_payment_link_visits_schema():
@@ -283,15 +331,7 @@ async def init_db():
 
         await _ensure_broadcast_schema(conn)
         
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS unsubscribed_users (
-                telegram_id BIGINT PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                unsubscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                reason TEXT DEFAULT 'manual'
-            )
-        """)
+        await _ensure_unsubscribed_schema(conn)
         
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS payment_tokens (
@@ -546,34 +586,100 @@ async def set_setting(key: str, value: str):
 async def unsubscribe_user(user_id: int, username: str = None, first_name: str = None, reason: str = 'manual'):
     conn = await get_conn()
     try:
-        if not username or not first_name:
-            user_data = await get_user(user_id)
-            if user_data:
-                username = user_data.get('username', '')
-                first_name = user_data.get('first_name', '')
+        async with conn.transaction():
+            if not username or not first_name:
+                user_data = await conn.fetchrow(
+                    "SELECT username, first_name FROM users WHERE telegram_id = $1",
+                    user_id,
+                )
+                if user_data:
+                    username = user_data['username'] or ''
+                    first_name = user_data['first_name'] or ''
 
-        sub = await get_subscription_by_user_id(user_id)
-        card_token = sub.get('card_token') if sub else None
-        subscription_id = sub.get('subscription_id') if sub else None
+            subscription_rows = await conn.fetch(
+                """
+                SELECT to_jsonb(s) AS snapshot
+                FROM subscriptions AS s
+                WHERE s.user_id = $1
+                ORDER BY s.created_at DESC, s.id DESC
+                """,
+                user_id,
+            )
+            latest_subscription = await conn.fetchrow(
+                """
+                SELECT *
+                FROM subscriptions
+                WHERE user_id = $1
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                user_id,
+            )
 
-        await conn.execute(
-            "UPDATE subscriptions SET status = 'cancelled' WHERE user_id = $1",
-            user_id
-        )
-        
-        await conn.execute("""
-            INSERT INTO unsubscribed_users (telegram_id, username, first_name, reason, unsubscribed_at, card_token, subscription_id)
-            VALUES ($1, $2, $3, $4, NOW(), $5, $6)
-            ON CONFLICT (telegram_id) DO UPDATE SET 
-                username = $2, 
-                first_name = $3, 
-                reason = $4, 
-                unsubscribed_at = NOW(),
-                card_token = $5,
-                subscription_id = $6
-        """, user_id, username or '', first_name or '', reason, card_token, subscription_id)
-        
-        return True
+            # Keep the complete history as JSON and also copy the current
+            # subscription's key fields for filtering and restoration.
+            snapshot_rows = []
+            for row in subscription_rows:
+                value = row['snapshot']
+                if isinstance(value, str):
+                    value = json.loads(value)
+                snapshot_rows.append(value)
+            subscription_snapshot = json.dumps(snapshot_rows, ensure_ascii=False, default=str)
+
+            card_token = latest_subscription['card_token'] if latest_subscription else None
+            subscription_id = latest_subscription['subscription_id'] if latest_subscription else None
+
+            await conn.execute(
+                "UPDATE subscriptions SET status = 'cancelled' WHERE user_id = $1",
+                user_id,
+            )
+
+            await conn.execute(
+                """
+                INSERT INTO unsubscribed_users (
+                    telegram_id, username, first_name, reason, unsubscribed_at,
+                    card_token, subscription_id, subscription_record_id,
+                    subscription_plan, subscription_start_date, subscription_end_date,
+                    subscription_status, subscription_created_at,
+                    subscription_next_retry_at, subscription_snapshot
+                )
+                VALUES (
+                    $1, $2, $3, $4, NOW(), $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14::jsonb
+                )
+                ON CONFLICT (telegram_id) DO UPDATE SET
+                    username = EXCLUDED.username,
+                    first_name = EXCLUDED.first_name,
+                    reason = EXCLUDED.reason,
+                    unsubscribed_at = EXCLUDED.unsubscribed_at,
+                    card_token = EXCLUDED.card_token,
+                    subscription_id = EXCLUDED.subscription_id,
+                    subscription_record_id = EXCLUDED.subscription_record_id,
+                    subscription_plan = EXCLUDED.subscription_plan,
+                    subscription_start_date = EXCLUDED.subscription_start_date,
+                    subscription_end_date = EXCLUDED.subscription_end_date,
+                    subscription_status = EXCLUDED.subscription_status,
+                    subscription_created_at = EXCLUDED.subscription_created_at,
+                    subscription_next_retry_at = EXCLUDED.subscription_next_retry_at,
+                    subscription_snapshot = EXCLUDED.subscription_snapshot
+                """,
+                user_id,
+                username or '',
+                first_name or '',
+                reason,
+                card_token,
+                subscription_id,
+                latest_subscription['id'] if latest_subscription else None,
+                latest_subscription['plan'] if latest_subscription else None,
+                latest_subscription['start_date'] if latest_subscription else None,
+                latest_subscription['end_date'] if latest_subscription else None,
+                latest_subscription['status'] if latest_subscription else None,
+                latest_subscription['created_at'] if latest_subscription else None,
+                latest_subscription.get('next_retry_at') if latest_subscription else None,
+                subscription_snapshot,
+            )
+
+            return True
     except Exception as e:
         print(f"❌ Ошибка отписки: {e}")
         return False

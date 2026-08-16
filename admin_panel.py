@@ -1665,19 +1665,19 @@ async def block_subscription(user_id: int):
                     status_code=400
                 )
             
-            await conn.execute(
-                "UPDATE subscriptions SET status = 'cancelled' WHERE user_id = $1",
-                user_id
-            )
-            
-            # Добавляем в отписавшиеся
+            # Сохраняем полный снимок подписки и переводим её в cancelled
+            # одной транзакцией внутри database.unsubscribe_user.
             user_data = await database.get_user(user_id)
-            if user_data:
-                await database.unsubscribe_user(
-                    user_id,
-                    user_data.get('username', ''),
-                    user_data.get('first_name', ''),
-                    'admin_block'
+            success = await database.unsubscribe_user(
+                user_id,
+                user_data.get('username', '') if user_data else '',
+                user_data.get('first_name', '') if user_data else '',
+                'admin_block'
+            )
+            if not success:
+                return JSONResponse(
+                    content={"success": False, "error": "Не удалось сохранить данные отписки"},
+                    status_code=500
                 )
             
             return JSONResponse(
@@ -1897,22 +1897,19 @@ async def block_subscription(user_id: int):
                 except Exception as e:
                     print(f"❌ Ошибка при отмене подписки: {e}")
             
-            await conn.execute(
-                "UPDATE subscriptions SET status = 'cancelled' WHERE user_id = $1",
-                user_id
+            # Сохраняем полный снимок подписки и переводим её в cancelled
+            # централизованно, чтобы ручная блокировка не теряла поля.
+            success = await database.unsubscribe_user(
+                user_id,
+                username,
+                first_name,
+                'admin_block'
             )
-            
-            await conn.execute("""
-                INSERT INTO unsubscribed_users (telegram_id, username, first_name, reason, unsubscribed_at, card_token, subscription_id)
-                VALUES ($1, $2, $3, 'admin_block', NOW(), $4, $5)
-                ON CONFLICT (telegram_id) DO UPDATE SET 
-                    username = $2, 
-                    first_name = $3, 
-                    reason = 'admin_block', 
-                    unsubscribed_at = NOW(),
-                    card_token = $4,
-                    subscription_id = $5
-            """, user_id, username, first_name, row.get('card_token'), row.get('subscription_id'))
+            if not success:
+                return JSONResponse(
+                    content={"success": False, "error": "Не удалось сохранить данные отписки"},
+                    status_code=500
+                )
             
             return JSONResponse(
                 content={"success": True, "message": f"Подписка пользователя {user_id} заблокирована"}
