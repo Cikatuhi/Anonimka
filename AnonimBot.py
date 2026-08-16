@@ -168,7 +168,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await database.save_message(user_id, original_sender_id, content, content_type)
             await update.message.reply_text("✅ Ваш ответ отправлен анонимно!")
 
-            await restore_original_reply_message(context, user_id)
+            await delete_reply_prompt(context, user_id)
+            context.user_data.clear()
 
             bot_username = context.bot.username
             deep_link = f"https://t.me/{bot_username}?start={user_id}"
@@ -403,8 +404,11 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in reply_sessions:
         del reply_sessions[user_id]
 
-        await restore_original_reply_message(context, user_id)
-        
+        try:
+            await query.message.delete()
+        except Exception as e:
+            print(f"Не удалось удалить сообщение с инструкцией ответа: {e}")
+
         context.user_data.clear()
         return
 
@@ -422,21 +426,19 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Не удалось удалить сообщение с отменённым действием: {e}")
 
 
-async def restore_original_reply_message(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> None:
-    """Возвращает исходное сообщение на его месте, не создавая дубликат."""
-    if 'original_text' not in context.user_data or 'question_message_id' not in context.user_data:
+async def delete_reply_prompt(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> None:
+    """Удаляет отдельное сообщение с инструкцией для ответа."""
+    message_id = context.user_data.get('question_message_id')
+    if not message_id:
         return
 
     try:
-        await context.bot.edit_message_text(
+        await context.bot.delete_message(
             chat_id=context.user_data.get('original_chat_id', user_id),
-            message_id=context.user_data['question_message_id'],
-            text=context.user_data.get('original_text', 'Сообщение'),
-            reply_markup=context.user_data.get('original_reply_markup'),
-            parse_mode="HTML"
+            message_id=message_id,
         )
     except Exception as e:
-        print(f"Ошибка восстановления исходного сообщения: {e}")
+        print(f"Ошибка удаления сообщения с инструкцией ответа: {e}")
 
 
 async def start_reply_action(
@@ -450,7 +452,7 @@ async def start_reply_action(
 ) -> bool:
     """Открывает форму анонимного ответа после успешной проверки SubGram."""
     if user_id in reply_sessions:
-        await restore_original_reply_message(context, user_id)
+        await delete_reply_prompt(context, user_id)
 
         del reply_sessions[user_id]
         context.user_data.clear()
@@ -469,9 +471,7 @@ async def start_reply_action(
     else:
         return False
 
-    context.user_data['original_text'] = original_text or 'Сообщение'
     context.user_data['original_chat_id'] = original_chat_id
-    context.user_data['original_reply_markup'] = original_reply_markup
 
     keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -480,23 +480,12 @@ async def start_reply_action(
         "Введите текст, фото, видео или другой контент, который хотите отправить анонимно."
     )
 
-    try:
-        msg = await context.bot.edit_message_text(
-            chat_id=original_chat_id,
-            message_id=original_message_id,
-            text=prompt_text,
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        # Например, исходное сообщение уже нельзя отредактировать.
-        print(f"Не удалось обновить исходное сообщение для ответа: {e}")
-        msg = await context.bot.send_message(
-            chat_id=original_chat_id,
-            text=prompt_text,
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
+    msg = await context.bot.send_message(
+        chat_id=original_chat_id,
+        text=prompt_text,
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
 
     reply_sessions[user_id] = original_sender_id
     context.user_data['question_message_id'] = msg.message_id
