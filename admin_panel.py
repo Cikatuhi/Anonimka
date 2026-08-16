@@ -80,19 +80,8 @@ app.add_middleware(
 )
 
 FAVICON_SVG = '''
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Anonimno">
-  <defs>
-    <linearGradient id="bg" x1="8" y1="4" x2="56" y2="60" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1a9e90"/>
-      <stop offset="1" stop-color="#0b5d59"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="16" fill="url(#bg)"/>
-  <path d="M9 27c6.7-7.3 15.1-11 23-11s16.3 3.7 23 11v10.5C49.5 47.3 40.7 52 32 52S14.5 47.3 9 37.5V27Z" fill="#f2fffc"/>
-  <path d="M14 29.5c5-4.2 11-6.3 18-6.3s13 2.1 18 6.3" fill="none" stroke="#0d7168" stroke-width="3" stroke-linecap="round"/>
-  <rect x="17" y="30" width="11" height="7" rx="3.5" fill="#163c3a"/>
-  <rect x="36" y="30" width="11" height="7" rx="3.5" fill="#163c3a"/>
-  <path d="M28 33.5h8M23 42c5.8 3.4 12.2 3.4 18 0" fill="none" stroke="#163c3a" stroke-width="2.5" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Валентинка">
+  <text x="32" y="49" text-anchor="middle" font-size="48">💌</text>
 </svg>
 '''
 
@@ -102,7 +91,7 @@ LOGIN_PAGE = '''
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=mask-v1">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=mail-v1">
     <title>Вход в админ-панель</title>
     <script>
         (() => {
@@ -214,7 +203,7 @@ BASE_HTML = '''
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=mask-v1">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=mail-v1">
     <title>Anonimno — панель управления</title>
     <script>
         (() => {
