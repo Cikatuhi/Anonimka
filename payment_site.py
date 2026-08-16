@@ -475,130 +475,75 @@ async def payment_page(user_id: int, request: Request):
             <script src="https://widget.cloudpayments.ru/bundles/paymentblocks.js"></script>
             <style>
                 :root {{
-                    --ink: #172033;
-                    --muted: #667085;
-                    --line: #e8ecf3;
-                    --accent: #7057e8;
-                    --accent-dark: #5942d1;
+                    --ink: #242424;
+                    --muted: #858585;
+                    --accent: #f3a0b7;
+                    --accent-hover: #e78ca5;
                 }}
                 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
                 body {{
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-                    background: #f5f7fb;
+                    background: #f3f3f3;
                     color: var(--ink);
                     min-height: 100vh;
-                    padding: 28px 16px 40px;
+                    padding: 22px 16px 40px;
                 }}
                 .page {{
-                    max-width: 560px;
+                    width: 100%;
+                    max-width: 700px;
                     margin: 0 auto;
                 }}
-                .brand {{
-                    display: flex;
-                    align-items: center;
-                    gap: 10px;
-                    color: var(--muted);
-                    font-size: 13px;
-                    font-weight: 600;
-                    letter-spacing: .02em;
-                    margin: 0 4px 18px;
+                .card {{
+                    width: 100%;
+                    background: #ffffff;
+                    border-radius: 24px;
+                    padding: 25px;
+                    box-shadow: 0 8px 30px rgba(20, 20, 20, .04);
                 }}
-                .brand-mark {{
-                    width: 32px;
-                    height: 32px;
+                .hero-icon {{
+                    width: 70px;
+                    height: 70px;
+                    margin: 0 auto 18px;
                     display: grid;
                     place-items: center;
-                    border-radius: 10px;
-                    color: #fff;
-                    background: linear-gradient(135deg, #8f7af6, var(--accent));
-                    box-shadow: 0 6px 16px rgba(112, 87, 232, .24);
-                    font-size: 17px;
-                }}
-                .card {{
-                    background: #ffffff;
-                    border: 1px solid var(--line);
-                    border-radius: 24px;
-                    padding: 30px 28px 26px;
-                    box-shadow: 0 16px 44px rgba(23, 32, 51, .08);
-                }}
-                .eyebrow {{
+                    border-radius: 22px;
+                    background: #fff1f5;
                     color: var(--accent);
-                    font-size: 12px;
-                    font-weight: 700;
-                    letter-spacing: .08em;
-                    text-transform: uppercase;
-                    margin-bottom: 10px;
+                    font-size: 42px;
                 }}
                 h1 {{
-                    font-size: clamp(25px, 5vw, 32px);
-                    line-height: 1.16;
-                    letter-spacing: -.04em;
-                    margin-bottom: 10px;
+                    max-width: 640px;
+                    margin: 0 auto 12px;
+                    text-align: center;
+                    font-size: clamp(26px, 5vw, 36px);
+                    line-height: 1.12;
+                    font-weight: 500;
+                    letter-spacing: -.035em;
                 }}
                 .lead {{
                     color: var(--muted);
-                    font-size: 15px;
-                    line-height: 1.55;
-                    margin-bottom: 22px;
-                }}
-                .benefits {{
-                    display: grid;
-                    gap: 10px;
-                    padding: 16px;
-                    border: 1px solid #eeeafd;
-                    border-radius: 16px;
-                    background: #faf9ff;
-                    margin-bottom: 18px;
-                }}
-                .benefit {{
-                    display: flex;
-                    align-items: flex-start;
-                    gap: 10px;
-                    color: #303b50;
-                    font-size: 14px;
-                    line-height: 1.4;
-                }}
-                .benefit-icon {{
-                    color: var(--accent);
-                    font-size: 17px;
-                    line-height: 1.1;
-                }}
-                .price {{
-                    display: flex;
-                    align-items: baseline;
-                    justify-content: space-between;
-                    gap: 12px;
-                    padding: 15px 16px;
-                    border: 1px solid var(--line);
-                    border-radius: 14px;
-                    margin-bottom: 18px;
-                }}
-                .price-label {{ color: var(--muted); font-size: 14px; }}
-                .price-value {{ color: var(--ink); font-size: 22px; font-weight: 800; }}
-                .price-value span {{ color: var(--muted); font-size: 13px; font-weight: 500; }}
-                .section-title {{ font-size: 16px; margin: 18px 0 8px; }}
-                .terms {{
-                    color: var(--muted);
-                    font-size: 12px;
-                    line-height: 1.55;
-                    margin: 17px 2px 0;
-                }}
-                .terms a, .footer a {{ color: var(--accent-dark); text-decoration: none; font-weight: 600; }}
-                .security {{
-                    display: flex;
-                    align-items: flex-start;
-                    gap: 9px;
-                    color: #667085;
-                    font-size: 12px;
+                    max-width: 590px;
+                    margin: 0 auto 28px;
+                    text-align: center;
+                    font-size: 16px;
                     line-height: 1.45;
-                    padding: 13px 14px;
-                    background: #f8fafc;
-                    border-radius: 12px;
-                    margin-top: 16px;
+                }}
+                .payment-shell {{
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 15px;
+                    border-radius: 24px;
+                    background: #f6f6f6;
+                }}
+                .section-title {{
+                    margin: 7px 0 16px;
+                    color: #9299a5;
+                    font-size: 23px;
+                    line-height: 1.2;
+                    font-weight: 500;
                 }}
                 #widget-container {{
                     min-height: 320px;
-                    margin-top: 4px;
                 }}
                 .footer {{
                     text-align: center;
@@ -609,32 +554,26 @@ async def payment_page(user_id: int, request: Request):
                 }}
                 @media (max-width: 480px) {{
                     body {{ padding: 18px 12px 28px; }}
-                    .card {{ padding: 24px 17px 21px; border-radius: 20px; }}
+                    .card {{ padding: 22px 15px 18px; border-radius: 20px; }}
+                    .hero-icon {{ width: 62px; height: 62px; margin-bottom: 15px; font-size: 36px; }}
                     #widget-container {{ min-height: 280px; }}
+                    .section-title {{ font-size: 20px; }}
                 }}
             </style>
         </head>
         <body>
             <main class="page">
-                <div class="brand"><span class="brand-mark">✉</span> Анонимное сообщение</div>
                 <section class="card">
-                    <div class="eyebrow">Премиум-доступ · шаг 2 из 2</div>
-                    <h1>Узнайте, кто отправил вам анонимное сообщение</h1>
-                    <p class="lead">После оплаты бот откроет доступ к информации об отправителе выбранного сообщения.</p>
-                    <div class="benefits">
-                        <div class="benefit"><span class="benefit-icon">✓</span><span>Информация об отправителе в Telegram</span></div>
-                        <div class="benefit"><span class="benefit-icon">✓</span><span>Доступ активируется сразу после подтверждения платежа</span></div>
-                        <div class="benefit"><span class="benefit-icon">✓</span><span>Подписку можно отменить в любой момент</span></div>
+                    <div class="hero-icon" aria-hidden="true">💌</div>
+                    <h1>Узнайте, кто пишет вам анонимные сообщения — всего за 5 рублей!</h1>
+                    <p class="lead">Вам доступна функция просмотра авторов анонимных сообщений.</p>
+                    <div class="payment-shell">
+                        <h2 class="section-title">Оплатить картой</h2>
+                        <div id="widget-container">
+                            <div style="text-align:center; color:#9299a5; padding:20px;">Загрузка формы оплаты...</div>
+                        </div>
                     </div>
-                    <div class="price"><span class="price-label">Пробный доступ</span><strong class="price-value">5 ₽ <span>за 1 день</span></strong></div>
-                    <h2 class="section-title">Оплата картой</h2>
-                    <div id="widget-container">
-                        <div style="text-align:center; color:#98a2b3; padding:20px;">Загрузка формы оплаты...</div>
-                    </div>
-                    <div class="security"><span>🔒</span><span>Данные карты обрабатывает CloudPayments. Мы не получаем и не храним реквизиты карты.</span></div>
-                    <p class="terms">Оформляя оплату, вы принимаете <a href="/doc1" target="_blank">условия использования</a>, <a href="/doc2" target="_blank">лицензию</a> и <a href="/doc3" target="_blank">условия платежей</a>. После пробного периода — 699 ₽ за 7 дней. Возможны списания 299 ₽ за 3 дня или 99 ₽ за 1 день.</p>
                 </section>
-                <div class="footer">Нужна помощь? Напишите в поддержку через бота.</div>
             </main>
             <script>
                 const container = document.getElementById('widget-container');
@@ -658,20 +597,20 @@ async def payment_page(user_id: int, request: Request):
                     {{
                         appearance: {{
                             colors: {{
-                                primaryButtonColor: "#7057e8",
-                                primaryHoverButtonColor: "#5942d1",
+                                primaryButtonColor: "#f3a0b7",
+                                primaryHoverButtonColor: "#e78ca5",
                                 primaryButtonTextColor: "#ffffff",
                                 primaryButtonHoverTextColor: "#ffffff",
-                                activeInputColor: "#7057e8",
-                                inputBackground: "#f8fafc",
-                                inputColor: "#172033",
-                                inputBorderColor: "#e8ecf3",
-                                titleColor: "#172033",
-                                textColor: "#303b50",
+                                activeInputColor: "#ed9ab2",
+                                inputBackground: "#ffffff",
+                                inputColor: "#242424",
+                                inputBorderColor: "#eeeeee",
+                                titleColor: "#242424",
+                                textColor: "#6f6f6f",
                                 errorColor: "#ef4444"
                             }},
                             borders: {{
-                                radius: "12px"
+                                radius: "16px"
                             }}
                         }},
                         components: {{
