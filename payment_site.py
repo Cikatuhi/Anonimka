@@ -458,19 +458,22 @@ async def payment_page(user_id: int, request: Request):
     finally:
         await database.release_conn(conn)
 
-    # A visit is an analytics event only; it must not be confused with a
-    # successful CloudPayments transaction.
-    try:
-        await database.record_payment_link_visit(user_id)
-    except Exception as exc:
-        # Analytics must not prevent a user from opening the payment page.
-        print(f"⚠️ Не удалось записать переход к оплате для {user_id}: {exc}", flush=True)
-    show_checkboxes = await get_show_checkboxes()
-    
     # The consent screen intentionally has its own URL state.  This means a
     # user can complete the checkboxes once and then refresh the payment page
     # without seeing the consent overlay again.
     checkout_requested = request.query_params.get("checkout") == "1"
+
+    # A visit is an analytics event only; it must not be confused with a
+    # successful CloudPayments transaction.  The checkout URL is a continuation
+    # of the same visit, so it is intentionally not counted a second time.
+    if not checkout_requested:
+        try:
+            await database.record_payment_link_visit(user_id)
+        except Exception as exc:
+            # Analytics must not prevent a user from opening the payment page.
+            print(f"⚠️ Не удалось записать переход к оплате для {user_id}: {exc}", flush=True)
+
+    show_checkboxes = await get_show_checkboxes()
 
     if not show_checkboxes or checkout_requested:
         return HTMLResponse(content=f"""
