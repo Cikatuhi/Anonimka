@@ -410,10 +410,16 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user_id in active_sessions:
         del active_sessions[user_id]
-        await query.edit_message_text("❌ Отправка отменена.")
+        try:
+            await query.message.delete()
+        except Exception as e:
+            print(f"Не удалось удалить сообщение с отменённым действием: {e}")
         return
 
-    await query.edit_message_text("❌ Отправка отменена.")
+    try:
+        await query.message.delete()
+    except Exception as e:
+        print(f"Не удалось удалить сообщение с отменённым действием: {e}")
 
 
 async def restore_original_reply_message(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> None:
