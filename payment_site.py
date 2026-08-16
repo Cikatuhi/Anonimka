@@ -536,11 +536,13 @@ async def payment_page(user_id: int, request: Request):
                     background: #f6f6f6;
                 }}
                 .section-title {{
-                    margin: 4px 0 10px;
-                    color: #9299a5;
-                    font-size: 19px;
-                    line-height: 1.2;
+                    margin: 2px 0 12px;
+                    color: #7f8794;
+                    text-align: center;
+                    font-size: 18px;
+                    line-height: 1.25;
                     font-weight: 500;
+                    letter-spacing: -.01em;
                 }}
                 #widget-container {{
                     min-height: 0;
@@ -558,7 +560,7 @@ async def payment_page(user_id: int, request: Request):
                     .hero-icon {{ width: 50px; height: 50px; margin-bottom: 10px; font-size: 29px; }}
                     .lead {{ margin-bottom: 14px; }}
                     .payment-shell {{ padding: 8px; border-radius: 16px; }}
-                    .section-title {{ margin: 3px 0 8px; font-size: 17px; }}
+                    .section-title {{ margin: 2px 0 9px; font-size: 16px; }}
                 }}
             </style>
         </head>
