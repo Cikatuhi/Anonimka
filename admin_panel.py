@@ -81,7 +81,7 @@ app.add_middleware(
 
 FAVICON_SVG = '''
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Валентинка">
-  <text x="32" y="49" text-anchor="middle" font-size="48">💌</text>
+  <text x="32" y="49" text-anchor="middle" font-size="48" font-family="Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif">&#x1F48C;</text>
 </svg>
 '''
 
@@ -91,7 +91,7 @@ LOGIN_PAGE = '''
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=mail-v1">
+    <link rel="icon" type="image/svg+xml" href="/admin-favicon-mail.svg">
     <title>Вход в админ-панель</title>
     <script>
         (() => {
@@ -203,7 +203,7 @@ BASE_HTML = '''
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=mail-v1">
+    <link rel="icon" type="image/svg+xml" href="/admin-favicon-mail.svg">
     <title>Anonimno — панель управления</title>
     <script>
         (() => {
@@ -471,7 +471,10 @@ def get_session_user(token: str) -> dict:
 sessions = {}
 
 async def auth_middleware(request: Request, call_next):
-    if request.url.path in {"/admin/login", "/health", "/favicon.svg", "/favicon.ico"}:
+    if request.url.path in {
+        "/admin/login", "/health", "/favicon.svg", "/favicon.ico",
+        "/admin-favicon-mail.svg", "/admin-favicon-mail.ico",
+    }:
         return await call_next(request)
     
     session_token = request.cookies.get("admin_session")
@@ -492,6 +495,8 @@ app.middleware("http")(auth_middleware)
 
 @app.get("/favicon.svg", include_in_schema=False)
 @app.get("/favicon.ico", include_in_schema=False)
+@app.get("/admin-favicon-mail.svg", include_in_schema=False)
+@app.get("/admin-favicon-mail.ico", include_in_schema=False)
 async def favicon():
     return Response(
         content=FAVICON_SVG,
