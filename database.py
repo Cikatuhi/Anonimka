@@ -162,12 +162,56 @@ async def ensure_broadcast_schema():
     conn = await get_conn()
     try:
         await _ensure_broadcast_schema(conn)
+        await _ensure_payment_link_visits_schema(conn)
     finally:
         await release_conn(conn)
 
 # ============================================
 # ОСТАЛЬНЫЕ ФУНКЦИИ (ТЕ ЖЕ)
 # ============================================
+
+async def _ensure_payment_link_visits_schema(conn):
+    """Create the aggregate audit table for visits to payment links."""
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS payment_link_visits (
+            user_id BIGINT PRIMARY KEY,
+            visit_count INTEGER NOT NULL DEFAULT 1,
+            first_visited_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_visited_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_payment_link_visits_last_visited_at
+        ON payment_link_visits (last_visited_at DESC)
+    """)
+
+
+async def ensure_payment_link_visits_schema():
+    """Run the payment-link visits migration from web processes."""
+    conn = await get_conn()
+    try:
+        await _ensure_payment_link_visits_schema(conn)
+    finally:
+        await release_conn(conn)
+
+
+async def record_payment_link_visit(user_id: int):
+    """Record one visit without treating it as a payment."""
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            """
+            INSERT INTO payment_link_visits (user_id)
+            VALUES ($1)
+            ON CONFLICT (user_id) DO UPDATE SET
+                visit_count = payment_link_visits.visit_count + 1,
+                last_visited_at = CURRENT_TIMESTAMP
+            """,
+            user_id,
+        )
+    finally:
+        await release_conn(conn)
+
 
 async def init_db():
     conn = await get_conn()

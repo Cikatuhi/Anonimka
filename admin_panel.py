@@ -39,6 +39,7 @@ async def ensure_admin_indexes() -> None:
         "CREATE INDEX IF NOT EXISTS idx_subscriptions_user_created_at ON subscriptions (user_id, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_payment_events_status_created_at ON payment_events (status, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_payment_events_user_created_at ON payment_events (user_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_payment_link_visits_last_visited_at ON payment_link_visits (last_visited_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_status_created_at ON broadcast_jobs (status, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_blocked_users_blocked_at ON blocked_users (blocked_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_unsubscribed_users_unsubscribed_at ON unsubscribed_users (unsubscribed_at DESC)",
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI):
     print("🚀 Инициализация БД...", flush=True)
     await database.init_pool()
     await database.ensure_broadcast_schema()
+    await database.ensure_payment_link_visits_schema()
     await ensure_admin_indexes()
     print("✅ БД готова", flush=True)
     try:
@@ -185,6 +187,7 @@ MENU = '''
         <div class="nav-section-title">Монетизация</div>
         <a class="nav-link" data-nav href="/subscriptions"><span class="nav-icon">◇</span><span>Подписки</span></a>
         <a class="nav-link" data-nav href="/payments"><span class="nav-icon">₽</span><span>Платежи</span></a>
+        <a class="nav-link" data-nav href="/payment-visits"><span class="nav-icon">↗</span><span>Переходы к оплате</span></a>
         <a class="nav-link" data-nav href="/subgram"><span class="nav-icon">◉</span><span>SubGram</span></a>
     </div>
     <div class="nav-section">
@@ -619,6 +622,7 @@ async def dashboard(request: Request):
     total_users = 0
     total_messages = 0
     total_subscriptions = 0
+    payment_visitors = 0
     worker_alive = False
     
     try:
@@ -635,6 +639,7 @@ async def dashboard(request: Request):
                         WHERE status = 'active'
                           AND (end_date IS NULL OR end_date > NOW())
                     ) AS total_subscriptions,
+                    (SELECT COUNT(*) FROM payment_link_visits) AS payment_visitors,
                     EXISTS (
                         SELECT 1
                         FROM service_heartbeats
@@ -646,6 +651,7 @@ async def dashboard(request: Request):
             total_users = stats["total_users"]
             total_messages = stats["total_messages"]
             total_subscriptions = stats["total_subscriptions"]
+            payment_visitors = stats["payment_visitors"]
             worker_alive = bool(stats["worker_alive"])
         finally:
             await database.release_conn(conn)
@@ -670,6 +676,7 @@ async def dashboard(request: Request):
         <div class="stat-card"><span class="icon">◎</span><div class="stat-number">{total_users}</div><div class="stat-label">Всего пользователей</div></div>
         <div class="stat-card"><span class="icon">◇</span><div class="stat-number">{total_subscriptions}</div><div class="stat-label">Активные подписки</div></div>
         <div class="stat-card"><span class="icon">≋</span><div class="stat-number">{total_messages}</div><div class="stat-label">Сообщений отправлено</div></div>
+        <div class="stat-card"><span class="icon">↗</span><div class="stat-number">{payment_visitors}</div><div class="stat-label">Перешли к оплате</div></div>
     </div>
     <div class="quick-grid">
         <section class="panel">
@@ -679,6 +686,7 @@ async def dashboard(request: Request):
                 <a class="quick-link" href="/broadcast"><span>Запустить новую рассылку</span><span>→</span></a>
                 <a class="quick-link" href="/subscriptions"><span>Проверить подписки</span><span>→</span></a>
                 <a class="quick-link" href="/payments"><span>Открыть платежную статистику</span><span>→</span></a>
+                <a class="quick-link" href="/payment-visits"><span>Посмотреть переходы к оплате</span><span>→</span></a>
             </div>
         </section>
         <section class="panel">
@@ -1975,6 +1983,106 @@ async def subgram_page(request: Request):
         import traceback
         traceback.print_exc()
         return HTMLResponse(content=f"<h1>❌ Ошибка</h1><pre>{traceback.format_exc()}</pre>")
+
+@app.get("/payment-visits", response_class=HTMLResponse)
+async def payment_link_visits_page(request: Request):
+    try:
+        page = max(1, int(request.query_params.get("page", "1")))
+    except (TypeError, ValueError):
+        page = 1
+
+    page_size = 25
+    total_people = 0
+    total_visits = 0
+    rows = []
+    error = None
+
+    try:
+        conn = await database.get_conn()
+        try:
+            total_people = int(await conn.fetchval(
+                "SELECT COUNT(*) FROM payment_link_visits"
+            ) or 0)
+            total_visits = int(await conn.fetchval(
+                "SELECT COALESCE(SUM(visit_count), 0) FROM payment_link_visits"
+            ) or 0)
+            rows = await conn.fetch(
+                """
+                SELECT p.user_id, p.visit_count, p.first_visited_at, p.last_visited_at,
+                       u.username, u.first_name
+                FROM payment_link_visits p
+                LEFT JOIN users u ON u.telegram_id = p.user_id
+                ORDER BY p.last_visited_at DESC
+                LIMIT $1 OFFSET $2
+                """,
+                page_size,
+                (page - 1) * page_size,
+            )
+        finally:
+            await database.release_conn(conn)
+    except Exception as exc:
+        print(f"❌ Ошибка загрузки переходов к оплате: {exc}", flush=True)
+        error = "Не удалось загрузить переходы к оплате"
+
+    total_pages = max(1, (total_people + page_size - 1) // page_size)
+    if page > total_pages:
+        page = total_pages
+
+    html = f'''
+    <div class="page-heading">
+        <div>
+            <h1>↗ Переходы к оплате</h1>
+            <p>Пользователи, которые открывали свою ссылку оплаты. Переход не означает успешную оплату.</p>
+        </div>
+        <div class="page-actions">
+            <a class="button button-secondary" href="/payment-visits">Обновить</a>
+        </div>
+    </div>
+    <div class="stats">
+        <div class="stat-card"><div class="stat-number">{total_people}</div><div class="stat-label">Уникальных пользователей</div></div>
+        <div class="stat-card"><div class="stat-number">{total_visits}</div><div class="stat-label">Всего переходов</div></div>
+    </div>
+    '''
+
+    if error:
+        html += f'<div class="empty">⚠️ {escape(error)}</div>'
+    elif rows:
+        html += '''
+        <div class="table-container">
+            <table>
+                <tr><th>Пользователь</th><th>Telegram ID</th><th>Переходов</th><th>Первый переход</th><th>Последний переход</th></tr>
+        '''
+        for row in rows:
+            username = row.get("username")
+            first_name = row.get("first_name")
+            if username:
+                person = "@" + escape(str(username))
+            elif first_name:
+                person = escape(str(first_name))
+            else:
+                person = "Без имени"
+            user_id = escape(str(row["user_id"]))
+            first_visit = row["first_visited_at"].strftime("%d.%m.%Y %H:%M") if row["first_visited_at"] else "—"
+            last_visit = row["last_visited_at"].strftime("%d.%m.%Y %H:%M") if row["last_visited_at"] else "—"
+            html += f'''
+                <tr>
+                    <td><strong>{person}</strong></td>
+                    <td>{user_id}</td>
+                    <td>{int(row["visit_count"] or 0)}</td>
+                    <td>{first_visit}</td>
+                    <td>{last_visit}</td>
+                </tr>
+            '''
+        html += '</table></div>'
+        previous = f'<a class="button button-secondary" href="/payment-visits?page={page - 1}">← Предыдущая</a>' if page > 1 else ''
+        next_page = f'<a class="button button-secondary" href="/payment-visits?page={page + 1}">Следующая →</a>' if page < total_pages else ''
+        html += f'<div class="page-actions" style="justify-content:space-between;margin-top:16px;"><span class="panel-copy">Страница {page} из {total_pages}</span><div style="display:flex;gap:8px;">{previous}{next_page}</div></div>'
+    else:
+        html += '<div class="empty">Переходов к оплате пока нет.</div>'
+
+    menu = MENU.replace('Переходы к оплате', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">Переходы к оплате</span>')
+    return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
+
 
 @app.get("/payments", response_class=HTMLResponse)
 async def payments_page(request: Request):

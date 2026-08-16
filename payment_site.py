@@ -15,6 +15,7 @@ import database
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await database.init_pool()
+    await database.ensure_payment_link_visits_schema()
     print("Database pool initialized", flush=True)
     try:
         yield
@@ -456,7 +457,14 @@ async def payment_page(user_id: int, request: Request):
             return HTMLResponse(content="<h1>Пользователь не найден</h1>", status_code=404)
     finally:
         await database.release_conn(conn)
-    
+
+    # A visit is an analytics event only; it must not be confused with a
+    # successful CloudPayments transaction.
+    try:
+        await database.record_payment_link_visit(user_id)
+    except Exception as exc:
+        # Analytics must not prevent a user from opening the payment page.
+        print(f"⚠️ Не удалось записать переход к оплате для {user_id}: {exc}", flush=True)
     show_checkboxes = await get_show_checkboxes()
     
     # The consent screen intentionally has its own URL state.  This means a
