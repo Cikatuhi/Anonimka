@@ -452,25 +452,16 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("❌ Отправка отменена.")
 
 
-async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data
-    user_id = query.from_user.id
-    chat_id = update.effective_chat.id
-    original_message = query.message
-
-    # ===== 1. ПРОВЕРКА SUBGRAM =====
-    subgram_result = await database.check_subgram(user_id, chat_id)
-
-    if subgram_result.get("status") == "warning":
-        # SubGram САМ показывает блок с подпиской
-        # НЕ отправляем своё сообщение, чтобы не было дубляжа
-        await query.answer("❌ Требуется подписка на каналы", show_alert=True)
-        return
-
-    # ===== 2. СТАНДАРТНАЯ ЛОГИКА ОТВЕТА =====
+async def start_reply_action(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    data: str,
+    original_chat_id: int,
+    original_message_id: int,
+    original_text: str | None,
+    original_reply_markup,
+) -> bool:
+    """Открывает форму анонимного ответа после успешной проверки SubGram."""
     if user_id in reply_sessions:
         if 'question_message_id' in context.user_data:
             try:
@@ -499,49 +490,138 @@ async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         del reply_sessions[user_id]
         context.user_data.clear()
 
-    context.user_data['original_text'] = original_message.text
-    context.user_data['original_chat_id'] = original_message.chat_id
-    context.user_data['original_reply_markup'] = original_message.reply_markup
-
     if data == "reply_anon":
-        reply_sessions[user_id] = ADMIN_ID
-        keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        msg = await query.edit_message_text(
-            text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
-                 f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
-        context.user_data['question_message_id'] = msg.message_id
-        return
-
-    if data.startswith("reply_"):
+        original_sender_id = ADMIN_ID
+    elif data.startswith("reply_"):
         parts = data.split("_")
         if len(parts) >= 2:
             try:
                 original_sender_id = int(parts[1])
-                reply_sessions[user_id] = original_sender_id
-
-                keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                msg = await query.edit_message_text(
-                    text=f"<b>✍️ Напишите ваш ответ</b>\n\n"
-                         f"Введите текст, фото, видео или другой контент, который хотите отправить анонимно.",
-                    reply_markup=reply_markup,
-                    parse_mode="HTML"
-                )
-                context.user_data['question_message_id'] = msg.message_id
-                return
             except ValueError:
-                pass
+                return False
+        else:
+            return False
+    else:
+        return False
 
-    await query.edit_message_text(
-        text="❌ Не удалось обработать запрос.",
-        parse_mode="HTML"
+    context.user_data['original_text'] = original_text or 'Сообщение'
+    context.user_data['original_chat_id'] = original_chat_id
+    context.user_data['original_reply_markup'] = original_reply_markup
+
+    keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    prompt_text = (
+        "<b>✍️ Напишите ваш ответ</b>\n\n"
+        "Введите текст, фото, видео или другой контент, который хотите отправить анонимно."
     )
+
+    try:
+        msg = await context.bot.edit_message_text(
+            chat_id=original_chat_id,
+            message_id=original_message_id,
+            text=prompt_text,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        # Например, исходное сообщение уже нельзя отредактировать.
+        print(f"Не удалось обновить исходное сообщение для ответа: {e}")
+        msg = await context.bot.send_message(
+            chat_id=original_chat_id,
+            text=prompt_text,
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
+
+    reply_sessions[user_id] = original_sender_id
+    context.user_data['question_message_id'] = msg.message_id
+    return True
+
+
+async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data
+    user_id = query.from_user.id
+    chat_id = update.effective_chat.id
+    original_message = query.message
+
+    # ===== 1. ПРОВЕРКА SUBGRAM =====
+    await query.answer("⏳ Проверяем подписки...")
+    subgram_result = await database.check_subgram(user_id, chat_id)
+
+    if subgram_result.get("status") == "warning":
+        # SubGram сам отправляет блок обязательной подписки. Сохраняем
+        # исходное действие, чтобы продолжить его после «Я выполнил».
+        context.user_data['subgram_pending_reply'] = {
+            'data': data,
+            'chat_id': original_message.chat_id,
+            'message_id': original_message.message_id,
+            'text': original_message.text,
+            'reply_markup': original_message.reply_markup,
+        }
+        return
+
+    if subgram_result.get("status") == "error":
+        logging.warning("SubGram не ответил корректно: %s. Доступ разрешён.", subgram_result.get("message"))
+
+    # ===== 2. СТАНДАРТНАЯ ЛОГИКА ОТВЕТА =====
+    started = await start_reply_action(
+        context=context,
+        user_id=user_id,
+        data=data,
+        original_chat_id=original_message.chat_id,
+        original_message_id=original_message.message_id,
+        original_text=original_message.text,
+        original_reply_markup=original_message.reply_markup,
+    )
+
+    if not started:
+        await query.edit_message_text(
+            text="❌ Не удалось обработать запрос.",
+            parse_mode="HTML"
+        )
+
+
+async def subgram_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Повторно проверяет подписки после кнопки SubGram «Я выполнил»."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    chat_id = query.message.chat_id
+
+    subgram_result = await database.check_subgram(user_id, chat_id)
+
+    if subgram_result.get("status") == "warning":
+        await query.answer("❌ Выполнены ещё не все задания. Попробуйте снова после подписки.", show_alert=True)
+        return
+
+    if subgram_result.get("status") == "error":
+        logging.warning("SubGram не ответил корректно: %s. Доступ разрешён.", subgram_result.get("message"))
+
+    pending_reply = context.user_data.pop('subgram_pending_reply', None)
+    if not pending_reply:
+        await query.answer("✅ Подписка подтверждена.")
+        return
+
+    started = await start_reply_action(
+        context=context,
+        user_id=user_id,
+        data=pending_reply['data'],
+        original_chat_id=pending_reply['chat_id'],
+        original_message_id=pending_reply['message_id'],
+        original_text=pending_reply.get('text'),
+        original_reply_markup=pending_reply.get('reply_markup'),
+    )
+
+    if not started:
+        await query.answer("❌ Не удалось продолжить действие. Нажмите кнопку «Ответить» ещё раз.", show_alert=True)
+        return
+
+    try:
+        await query.message.delete()
+    except Exception as e:
+        print(f"Не удалось удалить сообщение SubGram: {e}")
+
+    await query.answer("✅ Подписка подтверждена.")
 
 async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -931,6 +1011,7 @@ def main():
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(cancel_handler, pattern="cancel"))
     app.add_handler(CallbackQueryHandler(send_again_handler, pattern="send_again_"))
+    app.add_handler(CallbackQueryHandler(subgram_callback_handler, pattern=r"^subgram-op$"))
     app.add_handler(CallbackQueryHandler(reply_anon_handler, pattern="reply_"))
     app.add_handler(CallbackQueryHandler(who_is_it_handler, pattern="who_is_it"))
     app.add_handler(CallbackQueryHandler(buy_premium_handler, pattern="buy_premium"))
