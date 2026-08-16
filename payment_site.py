@@ -27,15 +27,7 @@ app = FastAPI(title="Anonimka — Документация и оплата", lif
 
 PAYMENT_FAVICON_SVG = '''
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Валентинка">
-  <defs>
-    <linearGradient id="heart-bg" x1="9" y1="7" x2="55" y2="57" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#ff8dab"/>
-      <stop offset="1" stop-color="#e84d7a"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="17" fill="url(#heart-bg)"/>
-  <path d="M32 49.5 14.8 33.7C8.3 27.7 9.1 17.1 16.5 13c5.2-2.9 11.7-1.5 15.5 3.2C35.8 11.5 42.3 10.1 47.5 13c7.4 4.1 8.2 14.7 1.7 20.7L32 49.5Z" fill="#fff8fb"/>
-  <path d="M21.5 17.5c3.2-1.7 6.8-.8 9.1 2.2" fill="none" stroke="#ffffff" stroke-opacity=".78" stroke-width="3" stroke-linecap="round"/>
+  <text x="32" y="49" text-anchor="middle" font-size="48">💌</text>
 </svg>
 '''
 
@@ -50,6 +42,8 @@ app.add_middleware(
 
 @app.get("/favicon.svg", include_in_schema=False)
 @app.get("/favicon.ico", include_in_schema=False)
+@app.get("/pay/favicon.svg", include_in_schema=False)
+@app.get("/pay/favicon.ico", include_in_schema=False)
 async def payment_favicon():
     """A small valentine icon for the browser tab of the payment pages."""
     return Response(
@@ -111,7 +105,7 @@ async def main_page():
         <title>Anonimka</title>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-        <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=valentine-v1">
+        <link rel="icon" type="image/svg+xml" href="/pay/favicon.svg?v=mail-v1">
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f7fa; color: #2c3e50; }
@@ -157,7 +151,7 @@ async def main_page():
 async def doc1():
     return HTMLResponse(content="""<!DOCTYPE html>
 <html>
-<head><title>Anonimka — Политика конфиденциальности</title><meta charset="utf-8"><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=valentine-v1">
+<head><title>Anonimka — Политика конфиденциальности</title><meta charset="utf-8"><link rel="icon" type="image/svg+xml" href="/pay/favicon.svg?v=mail-v1">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f7fa; color: #2c3e50; }
@@ -261,7 +255,7 @@ li { line-height: 1.8; color: #4a5568; margin-bottom: 6px; }
 async def doc2():
     return HTMLResponse(content="""<!DOCTYPE html>
 <html>
-<head><title>Anonimka — Условия использования</title><meta charset="utf-8"><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=valentine-v1">
+<head><title>Anonimka — Условия использования</title><meta charset="utf-8"><link rel="icon" type="image/svg+xml" href="/pay/favicon.svg?v=mail-v1">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f7fa; color: #2c3e50; }
@@ -376,7 +370,7 @@ li { line-height: 1.8; color: #4a5568; margin-bottom: 6px; }
 async def doc3():
     return HTMLResponse(content="""<!DOCTYPE html>
 <html>
-<head><title>Anonimka — Тарификация</title><meta charset="utf-8"><link rel="icon" type="image/svg+xml" href="/favicon.svg?v=valentine-v1">
+<head><title>Anonimka — Тарификация</title><meta charset="utf-8"><link rel="icon" type="image/svg+xml" href="/pay/favicon.svg?v=mail-v1">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f7fa; color: #2c3e50; }
@@ -508,7 +502,7 @@ async def payment_page(user_id: int, request: Request):
         <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-            <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=valentine-v1">
+            <link rel="icon" type="image/svg+xml" href="/pay/favicon.svg?v=mail-v1">
             <title>Anonimka — оформить доступ</title>
             <script src="https://widget.cloudpayments.ru/bundles/paymentblocks.js"></script>
             <style>
@@ -680,7 +674,7 @@ async def payment_page(user_id: int, request: Request):
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-        <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=valentine-v1">
+        <link rel="icon" type="image/svg+xml" href="/pay/favicon.svg?v=mail-v1">
         <title>Anonimka — оплата</title>
         <script src="https://widget.cloudpayments.ru/bundles/paymentblocks.js"></script>
         <style>
