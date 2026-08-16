@@ -261,6 +261,49 @@ async def record_payment_link_visit(user_id: int):
         await release_conn(conn)
 
 
+async def _ensure_core_schema(conn):
+    """Apply additive migrations required by the current application.
+
+    Existing installations can have the original tables but lack columns that
+    were introduced later.  These statements never delete rows or alter the
+    values already stored in the database, so it is safe to run at startup.
+    """
+    await conn.execute(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS has_seen_premium_offer BOOLEAN DEFAULT FALSE"
+    )
+    await conn.execute(
+        "ALTER TABLE blocked_users ADD COLUMN IF NOT EXISTS blocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    )
+    await conn.execute(
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS card_token TEXT"
+    )
+    await conn.execute(
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE"
+    )
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS payment_events (
+            id SERIAL PRIMARY KEY,
+            transaction_id TEXT UNIQUE NOT NULL,
+            user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+            amount INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_subscriptions_next_retry_at
+        ON subscriptions(next_retry_at)
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_payment_events_user_id
+        ON payment_events(user_id)
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_payment_events_created_at
+        ON payment_events(created_at DESC)
+    """)
+
+
 async def init_db():
     conn = await get_conn()
     try:
@@ -307,7 +350,11 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
+        # Keep an existing database from an older version compatible with the
+        # current bot before any service starts reading subscription data.
+        await _ensure_core_schema(conn)
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS broadcast_jobs (
                 id SERIAL PRIMARY KEY,
