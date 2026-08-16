@@ -168,21 +168,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await database.save_message(user_id, original_sender_id, content, content_type)
             await update.message.reply_text("✅ Ваш ответ отправлен анонимно!")
 
-            if 'original_text' in context.user_data and 'question_message_id' in context.user_data:
-                try:
-                    original_text = context.user_data.get('original_text', 'Сообщение')
-                    original_reply_markup = context.user_data.get('original_reply_markup')
-                    question_message_id = context.user_data.get('question_message_id')
-            
-                    await context.bot.edit_message_text(
-                        chat_id=user_id,
-                        message_id=question_message_id,
-                        text=original_text,
-                        reply_markup=original_reply_markup,
-                        parse_mode="HTML"
-                    )
-                except Exception as e:
-                    print(f"Ошибка восстановления: {e}")
+            await restore_original_reply_message(context, user_id)
 
             bot_username = context.bot.username
             deep_link = f"https://t.me/{bot_username}?start={user_id}"
@@ -417,29 +403,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in reply_sessions:
         del reply_sessions[user_id]
 
-        if 'question_message_id' in context.user_data:
-            try:
-                await context.bot.delete_message(
-                    chat_id=user_id,
-                    message_id=context.user_data['question_message_id']
-                )
-            except Exception as e:
-                print(f"Не удалось удалить сообщение с вопросом: {e}")
-
-        if 'original_text' in context.user_data:
-            try:
-                original_text = context.user_data.get('original_text', 'Сообщение')
-                original_reply_markup = context.user_data.get('original_reply_markup')
-                original_chat_id = context.user_data.get('original_chat_id', user_id)
-
-                await context.bot.send_message(
-                    chat_id=original_chat_id,
-                    text=original_text,
-                    reply_markup=original_reply_markup,
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                print(f"Ошибка восстановления: {e}")
+        await restore_original_reply_message(context, user_id)
         
         context.user_data.clear()
         return
@@ -450,6 +414,23 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await query.edit_message_text("❌ Отправка отменена.")
+
+
+async def restore_original_reply_message(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> None:
+    """Возвращает исходное сообщение на его месте, не создавая дубликат."""
+    if 'original_text' not in context.user_data or 'question_message_id' not in context.user_data:
+        return
+
+    try:
+        await context.bot.edit_message_text(
+            chat_id=context.user_data.get('original_chat_id', user_id),
+            message_id=context.user_data['question_message_id'],
+            text=context.user_data.get('original_text', 'Сообщение'),
+            reply_markup=context.user_data.get('original_reply_markup'),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        print(f"Ошибка восстановления исходного сообщения: {e}")
 
 
 async def start_reply_action(
@@ -463,29 +444,7 @@ async def start_reply_action(
 ) -> bool:
     """Открывает форму анонимного ответа после успешной проверки SubGram."""
     if user_id in reply_sessions:
-        if 'question_message_id' in context.user_data:
-            try:
-                await context.bot.delete_message(
-                    chat_id=user_id,
-                    message_id=context.user_data['question_message_id']
-                )
-            except Exception as e:
-                print(f"Не удалось удалить сообщение с вопросом: {e}")
-
-        if 'original_text' in context.user_data:
-            try:
-                original_text = context.user_data.get('original_text', 'Сообщение')
-                original_reply_markup = context.user_data.get('original_reply_markup')
-                original_chat_id = context.user_data.get('original_chat_id', user_id)
-
-                await context.bot.send_message(
-                    chat_id=original_chat_id,
-                    text=original_text,
-                    reply_markup=original_reply_markup,
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                print(f"Ошибка восстановления: {e}")
+        await restore_original_reply_message(context, user_id)
 
         del reply_sessions[user_id]
         context.user_data.clear()
