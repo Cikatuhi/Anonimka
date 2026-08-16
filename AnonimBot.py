@@ -11,6 +11,7 @@ import database
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
+SITE_URL = os.getenv("SITE_URL", "https://secretky.ru").rstrip("/")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -18,7 +19,7 @@ active_sessions = {}
 reply_sessions = {}
 MAX_SESSIONS = 1000
 
-ADMIN_ID = 7683869901
+ADMIN_ID = int(os.getenv("ADMIN_ID", "7683869901"))
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -662,7 +663,7 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("💳 Нажмите на кнопку для оплаты")
         return
     
-    payment_link = f"https://secretky.ru/pay/{user_id}"
+    payment_link = f"{SITE_URL}/pay/{user_id}"
     text = "<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>"
     keyboard = [
         [InlineKeyboardButton("👀 Узнать отправителя", url=payment_link)]
@@ -724,7 +725,7 @@ async def buy_premium_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     await database.register_user(user_id, username, first_name)
         
-    payment_link = f"https://secretky.ru/pay/{user_id}"
+    payment_link = f"{SITE_URL}/pay/{user_id}"
     
     text = (
         f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
@@ -835,9 +836,9 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Если у вас возник вопрос, предложение или просто есть желание что-то обсудить, напишите нам – @youzabota\n"
         f"⏰ <i>Время работы: с 10:00 до 19:00 (МСК)</i>\n\n"
         f"📚 <b>Документация</b>\n"
-        f"├─ <a href='https://secretky.ru/doc1'>Политика конфиденциальности</a>\n"
-        f"├─ <a href='https://secretky.ru/doc2'>Условия использования</a>\n"
-        f"└─ <a href='https://secretky.ru/doc3'>Тарификация</a>\n\n"
+        f"├─ <a href='{SITE_URL}/doc1'>Политика конфиденциальности</a>\n"
+        f"├─ <a href='{SITE_URL}/doc2'>Условия использования</a>\n"
+        f"└─ <a href='{SITE_URL}/doc3'>Тарификация</a>\n\n"
         f"📛 <b>Контактная информация</b>\n" 
         f"└─ ИП Докучаева Оксана Анатольевна\n"
         f" ├─ ИНН: 631936284733\n"

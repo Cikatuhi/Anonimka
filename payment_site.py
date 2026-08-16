@@ -12,6 +12,16 @@ from contextlib import asynccontextmanager
 sys.path.append('/root/Anonimno-Artem-')
 import database
 
+SITE_URL = os.getenv("SITE_URL", "https://secretky.ru").rstrip("/")
+CLOUDPAYMENTS_PUBLIC_ID = os.getenv(
+    "CLOUDPAYMENTS_PUBLIC_ID",
+    "pk_cfc9c99ee447f06de34f6cd148a22",
+)
+
+cors_origins = {SITE_URL, "http://localhost:8000"}
+if SITE_URL.startswith("https://"):
+    cors_origins.add("http://" + SITE_URL.removeprefix("https://"))
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await database.init_pool()
@@ -33,7 +43,7 @@ PAYMENT_FAVICON_SVG = '''
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://secretky.ru", "http://secretky.ru", "http://localhost:8000"],
+    allow_origins=sorted(cors_origins),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -616,7 +626,7 @@ async def payment_page(user_id: int, request: Request):
 
                 const blocksApp = new cp.PaymentBlocks(
                     {{
-                        publicTerminalId: "pk_cfc9c99ee447f06de34f6cd148a22",
+                        publicTerminalId: {json.dumps(CLOUDPAYMENTS_PUBLIC_ID)},
                         paymentSchema: 'Single',
                         description: "Premium access for 1 day",
                         amount: 5,
