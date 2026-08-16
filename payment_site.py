@@ -486,64 +486,64 @@ async def payment_page(user_id: int, request: Request):
                     background: #f3f3f3;
                     color: var(--ink);
                     min-height: 100vh;
-                    padding: 22px 16px 40px;
+                    padding: 16px 12px 24px;
                 }}
                 .page {{
                     width: 100%;
-                    max-width: 700px;
+                    max-width: 620px;
                     margin: 0 auto;
                 }}
                 .card {{
                     width: 100%;
                     background: #ffffff;
-                    border-radius: 24px;
-                    padding: 25px;
+                    border-radius: 20px;
+                    padding: 18px 18px 20px;
                     box-shadow: 0 8px 30px rgba(20, 20, 20, .04);
                 }}
                 .hero-icon {{
-                    width: 70px;
-                    height: 70px;
-                    margin: 0 auto 18px;
+                    width: 56px;
+                    height: 56px;
+                    margin: 0 auto 12px;
                     display: grid;
                     place-items: center;
-                    border-radius: 22px;
+                    border-radius: 17px;
                     background: #fff1f5;
                     color: var(--accent);
-                    font-size: 42px;
+                    font-size: 33px;
                 }}
                 h1 {{
-                    max-width: 640px;
-                    margin: 0 auto 12px;
+                    max-width: 520px;
+                    margin: 0 auto 8px;
                     text-align: center;
-                    font-size: clamp(26px, 5vw, 36px);
+                    font-size: clamp(22px, 4.5vw, 30px);
                     line-height: 1.12;
                     font-weight: 500;
                     letter-spacing: -.035em;
                 }}
                 .lead {{
                     color: var(--muted);
-                    max-width: 590px;
-                    margin: 0 auto 28px;
+                    max-width: 480px;
+                    margin: 0 auto 18px;
                     text-align: center;
-                    font-size: 16px;
+                    font-size: 14px;
                     line-height: 1.45;
                 }}
                 .payment-shell {{
-                    max-width: 600px;
+                    max-width: 540px;
                     margin: 0 auto;
-                    padding: 15px;
-                    border-radius: 24px;
+                    padding: 10px;
+                    border-radius: 18px;
                     background: #f6f6f6;
                 }}
                 .section-title {{
-                    margin: 7px 0 16px;
+                    margin: 4px 0 10px;
                     color: #9299a5;
-                    font-size: 23px;
+                    font-size: 19px;
                     line-height: 1.2;
                     font-weight: 500;
                 }}
                 #widget-container {{
-                    min-height: 320px;
+                    min-height: 0;
                 }}
                 .footer {{
                     text-align: center;
@@ -553,11 +553,12 @@ async def payment_page(user_id: int, request: Request):
                     margin: 16px 8px 0;
                 }}
                 @media (max-width: 480px) {{
-                    body {{ padding: 18px 12px 28px; }}
-                    .card {{ padding: 22px 15px 18px; border-radius: 20px; }}
-                    .hero-icon {{ width: 62px; height: 62px; margin-bottom: 15px; font-size: 36px; }}
-                    #widget-container {{ min-height: 280px; }}
-                    .section-title {{ font-size: 20px; }}
+                    body {{ padding: 12px 8px 18px; }}
+                    .card {{ padding: 16px 12px 15px; border-radius: 18px; }}
+                    .hero-icon {{ width: 50px; height: 50px; margin-bottom: 10px; font-size: 29px; }}
+                    .lead {{ margin-bottom: 14px; }}
+                    .payment-shell {{ padding: 8px; border-radius: 16px; }}
+                    .section-title {{ margin: 3px 0 8px; font-size: 17px; }}
                 }}
             </style>
         </head>
@@ -619,9 +620,9 @@ async def payment_page(user_id: int, request: Request):
                                 fontSize: "16px"
                             }},
                             paymentForm: {{
-                                labelFontSize: "13px",
-                                activeLabelFontSize: "13px",
-                                fontSize: "15px"
+                                labelFontSize: "12px",
+                                activeLabelFontSize: "12px",
+                                fontSize: "14px"
                             }}
                         }}
                     }}
