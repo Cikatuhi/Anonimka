@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import secrets
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 import asyncio
 import ssl
@@ -738,6 +739,32 @@ async def unsubscribe_user(user_id: int, username: str = None, first_name: str =
         await release_conn(conn)
 
 
+def _restore_snapshot_datetime(value, *, with_timezone: bool = False):
+    """Convert a JSON timestamp back to the type expected by asyncpg."""
+    if value is None or isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text or text.lower() in {"none", "null"}:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            # Keep the transaction safe: an invalid optional timestamp should
+            # not prevent restoring the rest of the saved subscription data.
+            return None
+    else:
+        return None
+
+    if parsed is None:
+        return None
+    if with_timezone:
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
 async def restore_unsubscribed_user(user_id: int):
     """Restore the subscription records saved in the unsubscribe archive.
 
@@ -769,11 +796,18 @@ async def restore_unsubscribed_user(user_id: int):
 
             # Only restore rows belonging to this user.  Older archive rows
             # may not have a snapshot, so fall back to the copied scalar fields.
-            snapshots = [
-                item for item in raw_snapshot
-                if isinstance(item, dict)
-                and (item.get("user_id") is None or int(item["user_id"]) == user_id)
-            ]
+            snapshots = []
+            for item in raw_snapshot:
+                if not isinstance(item, dict):
+                    continue
+                snapshot_user_id = item.get("user_id")
+                if snapshot_user_id is not None:
+                    try:
+                        if int(snapshot_user_id) != user_id:
+                            continue
+                    except (TypeError, ValueError):
+                        continue
+                snapshots.append(item)
             if not snapshots:
                 snapshots = [{
                     "id": archive.get("subscription_record_id"),
@@ -799,11 +833,15 @@ async def restore_unsubscribed_user(user_id: int):
                 subscription_id = item.get("subscription_id")
                 card_token = item.get("card_token")
                 plan = item.get("plan") or archive.get("subscription_plan") or "HIGH"
-                start_date = item.get("start_date")
-                end_date = item.get("end_date")
+                start_date = _restore_snapshot_datetime(item.get("start_date"))
+                end_date = _restore_snapshot_datetime(item.get("end_date"))
                 status = item.get("status") or archive.get("subscription_status") or "active"
-                created_at = item.get("created_at") or archive.get("subscription_created_at")
-                next_retry_at = item.get("next_retry_at")
+                created_at = _restore_snapshot_datetime(
+                    item.get("created_at") or archive.get("subscription_created_at")
+                )
+                next_retry_at = _restore_snapshot_datetime(
+                    item.get("next_retry_at"), with_timezone=True
+                )
 
                 if record_id is not None:
                     command = await conn.execute(
