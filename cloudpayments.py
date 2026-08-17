@@ -43,9 +43,19 @@ class CloudPaymentsClient:
                 "CloudPayments charge response: HTTP %s",
                 response.status_code
             )
-            
-            if response.status_code == 200:
+
+            try:
                 data = response.json()
+            except ValueError:
+                data = {}
+            model = data.get("Model") if isinstance(data, dict) else {}
+            if not isinstance(model, dict):
+                model = {}
+            reason_code = model.get("ReasonCode")
+            if reason_code is None and isinstance(data, dict):
+                reason_code = data.get("ReasonCode")
+
+            if response.status_code == 200:
                 logger.info(
                     "CloudPayments charge parsed response: Success=%s, Message=%s",
                     data.get("Success"),
@@ -54,14 +64,16 @@ class CloudPaymentsClient:
                 if data.get("Success"):
                     return {
                         "success": True,
-                        "data": data.get("Model", {}),
+                        "data": model,
+                        "reason_code": reason_code,
                         "message": "Payment initiated, waiting for webhook confirmation"
                     }
                 else:
                     return {
                         "success": False,
                         "error": data.get("Message", "Unknown error"),
-                        "data": data.get("Model", {})
+                        "data": model,
+                        "reason_code": reason_code,
                     }
             else:
                 logger.error(
@@ -70,7 +82,9 @@ class CloudPaymentsClient:
                 )
                 return {
                     "success": False,
-                    "error": f"HTTP {response.status_code}"
+                    "error": f"HTTP {response.status_code}",
+                    "data": model,
+                    "reason_code": reason_code,
                 }
         except Exception as e:
             logger.error(f"Error charging card: {e}")

@@ -992,7 +992,12 @@ async def unsubscribed_page(request: Request):
                 'admin_block': '🚫 Админ',
                 'expired': '⏰ Истекла'
             }
-            reason = reason_labels.get(row.get('reason', 'manual'), row.get('reason', 'manual'))
+            raw_reason = row.get('reason', 'manual')
+            if str(raw_reason).startswith('card_unavailable_'):
+                reason_code = str(raw_reason).rsplit('_', 1)[-1]
+                reason = f'💳 Карта недоступна (код {escape(reason_code)})'
+            else:
+                reason = reason_labels.get(raw_reason, raw_reason)
             
             token = row.get('card_token', '')
             token_display = token[:20] + '...' if token and len(token) > 20 else token or '—'

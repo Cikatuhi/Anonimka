@@ -635,8 +635,16 @@ async def set_setting(key: str, value: str):
     finally:
         await release_conn(conn)
 
-async def unsubscribe_user(user_id: int, username: str = None, first_name: str = None, reason: str = 'manual'):
-    conn = await get_conn()
+async def unsubscribe_user(
+    user_id: int,
+    username: str = None,
+    first_name: str = None,
+    reason: str = 'manual',
+    conn=None,
+):
+    owns_conn = conn is None
+    if owns_conn:
+        conn = await get_conn()
     try:
         async with conn.transaction():
             if not username or not first_name:
@@ -736,7 +744,8 @@ async def unsubscribe_user(user_id: int, username: str = None, first_name: str =
         print(f"❌ Ошибка отписки: {e}")
         return False
     finally:
-        await release_conn(conn)
+        if owns_conn:
+            await release_conn(conn)
 
 
 def _restore_snapshot_datetime(value, *, with_timezone: bool = False):

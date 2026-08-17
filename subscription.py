@@ -12,6 +12,23 @@ from cloudpayments import CloudPaymentsClient
 
 logger = logging.getLogger(__name__)
 
+CARD_UNAVAILABLE_REASON_CODES = {5014, 5054, 5062, 5041}
+
+
+def _normalise_reason_code(value) -> int | None:
+    """Convert CloudPayments' numeric reason code to a stable integer."""
+    if value is None or value == "":
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _card_unavailable_reason_code(value) -> int | None:
+    code = _normalise_reason_code(value)
+    return code if code in CARD_UNAVAILABLE_REASON_CODES else None
+
 
 class SubscriptionManager:
     """Token-charge subscription manager.
@@ -213,6 +230,37 @@ class SubscriptionManager:
                     "message": "Charge initiated; waiting for webhook",
                 }
 
+            reason_code = _card_unavailable_reason_code(result.get("reason_code"))
+            if reason_code is not None:
+                reason = f"card_unavailable_{reason_code}"
+                archived = await database.unsubscribe_user(
+                    int(user_id),
+                    reason=reason,
+                )
+                if not archived:
+                    logger.error(
+                        "User %s: failed to archive subscription after card-unavailable code %s",
+                        user_id,
+                        reason_code,
+                    )
+                    return {
+                        "success": False,
+                        "status": "card_unavailable",
+                        "reason_code": reason_code,
+                        "error": "Failed to archive subscription",
+                    }
+                logger.warning(
+                    "User %s: card unavailable (reason code %s); subscription archived",
+                    user_id,
+                    reason_code,
+                )
+                return {
+                    "success": False,
+                    "status": "unsubscribed",
+                    "reason": reason,
+                    "reason_code": reason_code,
+                }
+
             next_retry_at = now_msk() + timedelta(days=1)
             await self._set_next_retry_at(user_id, next_retry_at)
             logger.warning(f"⚠️ User {user_id}: Retry LOW 99₽ failed; next attempt at {next_retry_at}")
@@ -244,6 +292,37 @@ class SubscriptionManager:
                     "plan": plan,
                     "amount": amount / 100,
                     "message": "Charge initiated; waiting for webhook",
+                }
+
+            reason_code = _card_unavailable_reason_code(result.get("reason_code"))
+            if reason_code is not None:
+                reason = f"card_unavailable_{reason_code}"
+                archived = await database.unsubscribe_user(
+                    int(user_id),
+                    reason=reason,
+                )
+                if not archived:
+                    logger.error(
+                        "User %s: failed to archive subscription after card-unavailable code %s",
+                        user_id,
+                        reason_code,
+                    )
+                    return {
+                        "success": False,
+                        "status": "card_unavailable",
+                        "reason_code": reason_code,
+                        "error": "Failed to archive subscription",
+                    }
+                logger.warning(
+                    "User %s: card unavailable (reason code %s); subscription archived",
+                    user_id,
+                    reason_code,
+                )
+                return {
+                    "success": False,
+                    "status": "unsubscribed",
+                    "reason": reason,
+                    "reason_code": reason_code,
                 }
 
             next_plan = self.fallback_plan[plan]
@@ -286,6 +365,7 @@ class SubscriptionManager:
             return {"success": False, "error": "Invalid Amount"}
 
         status = payload.get("Status")
+        reason_code = _card_unavailable_reason_code(payload.get("ReasonCode"))
         card_token = payload.get("CardToken")
         transaction_key = str(transaction_id)
 
@@ -333,6 +413,35 @@ class SubscriptionManager:
                     amount,
                     status,
                 )
+
+                # These codes mean that the saved card cannot be charged.
+                # Archive the complete subscription snapshot and stop all
+                # HIGH -> MEDIUM -> LOW fallback attempts.
+                if status != "Completed" and reason_code is not None:
+                    reason = f"card_unavailable_{reason_code}"
+                    archived = await database.unsubscribe_user(
+                        int(user_id),
+                        reason=reason,
+                        conn=conn,
+                    )
+                    if not archived:
+                        raise RuntimeError(
+                            f"Failed to archive subscription for reason code {reason_code}"
+                        )
+                    logger.warning(
+                        "User %s: recurrent transaction %s reported card unavailable "
+                        "(reason code %s); subscription archived",
+                        user_id,
+                        transaction_key,
+                        reason_code,
+                    )
+                    return {
+                        "success": False,
+                        "status": "unsubscribed",
+                        "reason": reason,
+                        "reason_code": reason_code,
+                        "transaction_id": transaction_key,
+                    }
 
                 if status == "Completed":
                     plan_by_amount = {

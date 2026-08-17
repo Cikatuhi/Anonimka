@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from urllib.parse import parse_qsl
-from subscription import SubscriptionManager
+from subscription import SubscriptionManager, CARD_UNAVAILABLE_REASON_CODES, _normalise_reason_code
 from time_utils import now_msk
 import database
 from config import config
@@ -84,6 +84,10 @@ async def handle_webhook(request: Request):
         status = model.get("Status")
         amount_rub = model.get("Amount", 0)
         transaction_id = model.get("TransactionId")
+        raw_reason_code = model.get("ReasonCode")
+        if raw_reason_code is None:
+            raw_reason_code = body.get("ReasonCode")
+        reason_code = _normalise_reason_code(raw_reason_code)
         is_recurrent = _as_bool(model.get("IsRecurrent", False))
 
         logger.info(
@@ -110,15 +114,19 @@ async def handle_webhook(request: Request):
         # Token charges are reported through Pay.  Some CloudPayments payloads
         # do not flag them as IsRecurrent, so classify a pending retry_low
         # subscription by its server-side state rather than by the form format.
-        if (
-            not is_recurrent
-            and account_id
-            and transaction_id is not None
-            and status == "Completed"
-        ):
+        if not is_recurrent and account_id and transaction_id is not None:
             try:
                 existing = await database.get_subscription_by_user_id(int(account_id))
-                is_recurrent = bool(existing and existing.get("status") == "retry_low")
+                is_recurrent = bool(
+                    existing
+                    and (
+                        existing.get("status") == "retry_low"
+                        or (
+                            reason_code in CARD_UNAVAILABLE_REASON_CODES
+                            and status != "Completed"
+                        )
+                    )
+                )
             except (TypeError, ValueError):
                 is_recurrent = False
 
@@ -133,7 +141,7 @@ async def handle_webhook(request: Request):
                 "TransactionId": transaction_id,
                 "SubscriptionId": subscription_id,
                 "IsRecurrent": True,
-                "ReasonCode": model.get("ReasonCode"),
+                "ReasonCode": reason_code,
                 "CardToken": card_token,
             }
 
