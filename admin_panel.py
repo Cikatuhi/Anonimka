@@ -1343,6 +1343,10 @@ async def broadcast_page(request: Request):
                         style="display: {'inline-flex' if status_text in ('running', 'pending') else 'none'};">
                     Поставить на паузу
                 </button>
+                <button onclick="resumeBroadcast()" id="resumeBtn" class="button-success"
+                        style="display: {'inline-flex' if status_text == 'paused' else 'none'};">
+                    Продолжить рассылку
+                </button>
                 <button onclick="archiveBroadcast()" id="archiveBtn" class="button-danger"
                         style="display: {'none' if status_text == 'archived' else 'inline-flex'};">
                     Архивировать задачу
@@ -1385,6 +1389,10 @@ async def broadcast_page(request: Request):
                         if (pauseBtn) {{
                             pauseBtn.style.display = ['running', 'pending'].includes(data.status) ? 'inline-flex' : 'none';
                         }}
+                        const resumeBtn = document.getElementById('resumeBtn');
+                        if (resumeBtn) {{
+                            resumeBtn.style.display = data.status === 'paused' ? 'inline-flex' : 'none';
+                        }}
                     }}
                 }} catch (e) {{
                     console.error('Ошибка обновления статуса:', e);
@@ -1414,6 +1422,33 @@ async def broadcast_page(request: Request):
                     alert('❌ Ошибка: ' + e.message);
                 }} finally {{
                     btn.textContent = 'Поставить на паузу';
+                    btn.disabled = false;
+                }}
+            }}
+
+            async function resumeBroadcast() {{
+                if (!confirm('▶️ Продолжить рассылку #${{jobId}}?')) return;
+
+                const btn = document.getElementById('resumeBtn');
+                btn.textContent = '⏳ Возобновление...';
+                btn.disabled = true;
+
+                try {{
+                    const response = await fetch(`/broadcast/resume/${{jobId}}`, {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }}
+                    }});
+                    const data = await response.json();
+                    if (data.success) {{
+                        alert('✅ ' + data.message);
+                        window.location.reload();
+                    }} else {{
+                        alert('❌ Ошибка: ' + data.error);
+                    }}
+                }} catch (e) {{
+                    alert('❌ Ошибка: ' + e.message);
+                }} finally {{
+                    btn.textContent = 'Продолжить рассылку';
                     btn.disabled = false;
                 }}
             }}
@@ -1597,6 +1632,55 @@ async def pause_broadcast(job_id: int):
                 "success": True,
                 "message": f"Рассылка #{job_id} поставлена на паузу",
                 "job_id": job_id
+            }
+        )
+
+@app.post("/broadcast/resume/{job_id}")
+async def resume_broadcast(job_id: int):
+    """Resume a paused broadcast and return any leased recipients to the queue."""
+    async with database.connection() as conn:
+        async with conn.transaction():
+            job = await conn.fetchrow(
+                "SELECT status FROM broadcast_jobs WHERE id = $1 FOR UPDATE",
+                job_id,
+            )
+            if not job:
+                return JSONResponse(
+                    content={"success": False, "error": "Задача не найдена"},
+                    status_code=404,
+                )
+
+            if job["status"] != "paused":
+                return JSONResponse(
+                    content={
+                        "success": False,
+                        "error": f"Нельзя возобновить задачу со статусом {job['status']}",
+                    },
+                    status_code=400,
+                )
+
+            await conn.execute(
+                """
+                UPDATE broadcast_jobs
+                SET status = 'pending', paused_at = NULL, heartbeat_at = NULL
+                WHERE id = $1
+                """,
+                job_id,
+            )
+            await conn.execute(
+                """
+                UPDATE broadcast_job_recipients
+                SET status = 'pending', updated_at = NOW()
+                WHERE job_id = $1 AND status = 'processing'
+                """,
+                job_id,
+            )
+
+        return JSONResponse(
+            content={
+                "success": True,
+                "message": f"Рассылка #{job_id} возобновлена",
+                "job_id": job_id,
             }
         )
 
