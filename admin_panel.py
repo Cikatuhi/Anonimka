@@ -999,7 +999,7 @@ async def unsubscribed_page(request: Request):
             
             # Кнопка восстановления
             restore_btn = f'''
-            <button onclick="restoreUser({row['telegram_id']})" 
+            <button onclick="restoreUser(event, {row['telegram_id']})"
                     style="padding:4px 12px; border:1px solid #7c3aed; border-radius:6px; background:transparent; color:#7c3aed; cursor:pointer; font-size:11px;">
                 🔄 Восстановить
             </button>
@@ -1020,9 +1020,9 @@ async def unsubscribed_page(request: Request):
         
         html += '''
         <script>
-            async function restoreUser(userId) {
+            async function restoreUser(event, userId) {
                 if (!confirm('⚠️ Вы уверены, что хотите восстановить подписку пользователя #' + userId + '?')) return;
-                
+
                 const btn = event.target;
                 btn.textContent = '⏳...';
                 btn.disabled = true;
@@ -1868,96 +1868,26 @@ async def broadcast_list(request: Request):
 @app.post("/unsubscribed/restore/{user_id}")
 async def restore_subscription(user_id: int):
     try:
-        conn = await database.get_conn()
-        try:
-            # ===== 1. Проверяем, есть ли пользователь в отписавшихся =====
-            unsub_row = await conn.fetchrow(
-                "SELECT * FROM unsubscribed_users WHERE telegram_id = $1",
-                user_id
-            )
-            if not unsub_row:
-                return JSONResponse(
-                    content={"success": False, "error": "Пользователь не найден в отписавшихся"},
-                    status_code=404
-                )
-            
-            card_token = unsub_row.get('card_token')
-            subscription_id = unsub_row.get('subscription_id')
-            
-            # ===== 2. Восстанавливаем подписку в БД =====
-            end_date = now_msk() + timedelta(days=7)
-            
-            # Проверяем, есть ли уже подписка
-            existing = await conn.fetchrow(
-                "SELECT id FROM subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
-                user_id
-            )
-            
-            if existing:
-                await conn.execute(
-                    """
-                    UPDATE subscriptions 
-                    SET status = 'active', 
-                        end_date = $1,
-                        plan = 'HIGH',
-                        card_token = $2,
-                        subscription_id = $3
-                    WHERE user_id = $4
-                    """,
-                    end_date, card_token, subscription_id, user_id
-                )
-            else:
-                await conn.execute(
-                    """
-                    INSERT INTO subscriptions (user_id, plan, status, end_date, card_token, subscription_id, created_at)
-                    VALUES ($1, 'HIGH', 'active', $2, $3, $4, NOW())
-                    """,
-                    user_id, end_date, card_token, subscription_id
-                )
-            
-            await conn.execute(
-                "DELETE FROM unsubscribed_users WHERE telegram_id = $1",
-                user_id
-            )
-            
-            if card_token:
-                try:
-                    from cloudpayments import CloudPaymentsClient
-                    cp_client = CloudPaymentsClient()
-                    
-                    result = await cp_client.create_subscription(
-                        token=card_token,
-                        account_id=str(user_id),
-                        amount=69900,
-                        interval_days=1,
-                        max_periods=None
-                    )
-                    
-                    if result["success"]:
-                        new_subscription_id = result["subscription_id"]
-                        await conn.execute(
-                            "UPDATE subscriptions SET subscription_id = $1 WHERE user_id = $2",
-                            new_subscription_id, user_id
-                        )
-                        print(f"✅ Восстановлена подписка в CloudPayments для {user_id}")
-                    else:
-                        print(f"❌ Ошибка восстановления подписки в CloudPayments: {result.get('error')}")
-                except Exception as e:
-                    print(f"❌ Ошибка при создании подписки в CloudPayments: {e}")
-            
+        result = await database.restore_unsubscribed_user(user_id)
+        if result is None:
             return JSONResponse(
-                content={
-                    "success": True,
-                    "message": f"Подписка пользователя {user_id} восстановлена"
-                }
+                content={"success": False, "error": "Пользователь не найден в отписавшихся"},
+                status_code=404,
             )
-        finally:
-            await database.release_conn(conn)
+
+        restored_count = result["restored_count"]
+        return JSONResponse(
+            content={
+                "success": True,
+                "message": f"Подписка пользователя {user_id} восстановлена ({restored_count} записей)",
+                "restored_count": restored_count,
+            }
+        )
     except Exception as e:
         print(f"❌ Ошибка восстановления подписки: {e}")
         return JSONResponse(
             content={"success": False, "error": str(e)},
-            status_code=500
+            status_code=500,
         )
 
 @app.post("/subscription/block/{user_id}")

@@ -736,6 +736,140 @@ async def unsubscribe_user(user_id: int, username: str = None, first_name: str =
         return False
     finally:
         await release_conn(conn)
+
+
+async def restore_unsubscribed_user(user_id: int):
+    """Restore the subscription records saved in the unsubscribe archive.
+
+    Unsubscribing keeps a JSON snapshot because a user can have more than one
+    historical subscription row.  Restore that snapshot atomically instead of
+    inventing a new plan or term.  The archive is removed only after every row
+    has been restored successfully.
+    """
+    conn = await get_conn()
+    try:
+        async with conn.transaction():
+            archive = await conn.fetchrow(
+                "SELECT * FROM unsubscribed_users WHERE telegram_id = $1 FOR UPDATE",
+                user_id,
+            )
+            if not archive:
+                return None
+
+            raw_snapshot = archive.get("subscription_snapshot")
+            if isinstance(raw_snapshot, str):
+                try:
+                    raw_snapshot = json.loads(raw_snapshot)
+                except json.JSONDecodeError:
+                    raw_snapshot = []
+            if isinstance(raw_snapshot, dict):
+                raw_snapshot = [raw_snapshot]
+            if not isinstance(raw_snapshot, list):
+                raw_snapshot = []
+
+            # Only restore rows belonging to this user.  Older archive rows
+            # may not have a snapshot, so fall back to the copied scalar fields.
+            snapshots = [
+                item for item in raw_snapshot
+                if isinstance(item, dict)
+                and (item.get("user_id") is None or int(item["user_id"]) == user_id)
+            ]
+            if not snapshots:
+                snapshots = [{
+                    "id": archive.get("subscription_record_id"),
+                    "user_id": user_id,
+                    "subscription_id": archive.get("subscription_id"),
+                    "card_token": archive.get("card_token"),
+                    "plan": archive.get("subscription_plan") or "HIGH",
+                    "start_date": archive.get("subscription_start_date"),
+                    "end_date": archive.get("subscription_end_date"),
+                    "status": archive.get("subscription_status") or "active",
+                    "created_at": archive.get("subscription_created_at"),
+                    "next_retry_at": archive.get("subscription_next_retry_at"),
+                }]
+
+            restored_ids = []
+            for item in snapshots:
+                record_id = item.get("id")
+                try:
+                    record_id = int(record_id) if record_id is not None else None
+                except (TypeError, ValueError):
+                    record_id = None
+
+                subscription_id = item.get("subscription_id")
+                card_token = item.get("card_token")
+                plan = item.get("plan") or archive.get("subscription_plan") or "HIGH"
+                start_date = item.get("start_date")
+                end_date = item.get("end_date")
+                status = item.get("status") or archive.get("subscription_status") or "active"
+                created_at = item.get("created_at") or archive.get("subscription_created_at")
+                next_retry_at = item.get("next_retry_at")
+
+                if record_id is not None:
+                    command = await conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET subscription_id = $1,
+                            card_token = $2,
+                            plan = $3,
+                            start_date = $4,
+                            end_date = $5,
+                            status = $6,
+                            created_at = COALESCE($7, created_at),
+                            next_retry_at = $8
+                        WHERE id = $9 AND user_id = $10
+                        """,
+                        subscription_id,
+                        card_token,
+                        plan,
+                        start_date,
+                        end_date,
+                        status,
+                        created_at,
+                        next_retry_at,
+                        record_id,
+                        user_id,
+                    )
+                    if command == "UPDATE 1":
+                        restored_ids.append(record_id)
+                        continue
+
+                inserted = await conn.fetchrow(
+                    """
+                    INSERT INTO subscriptions (
+                        user_id, subscription_id, card_token, plan, start_date,
+                        end_date, status, created_at, next_retry_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, NOW()), $9)
+                    RETURNING id
+                    """,
+                    user_id,
+                    subscription_id,
+                    card_token,
+                    plan,
+                    start_date,
+                    end_date,
+                    status,
+                    created_at,
+                    next_retry_at,
+                )
+                restored_ids.append(inserted["id"])
+
+            if not restored_ids:
+                raise RuntimeError("В архиве нет данных подписки для восстановления")
+
+            await conn.execute(
+                "DELETE FROM unsubscribed_users WHERE telegram_id = $1",
+                user_id,
+            )
+            return {"restored_count": len(restored_ids), "subscription_ids": restored_ids}
+    except Exception as e:
+        print(f"❌ Ошибка восстановления подписки в БД: {e}")
+        raise
+    finally:
+        await release_conn(conn)
+
+
 async def is_user_unsubscribed(user_id: int) -> bool:
     conn = await get_conn()
     try:
