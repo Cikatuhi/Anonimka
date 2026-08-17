@@ -1,5 +1,6 @@
 import asyncpg
 import json
+import logging
 import os
 import secrets
 from dotenv import load_dotenv
@@ -865,13 +866,20 @@ async def check_subgram(user_id: int, chat_id: int) -> dict:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload, timeout=10) as response:
+                response_text = await response.text()
                 if response.status == 200:
-                    data = await response.json()
+                    try:
+                        data = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        logging.error("SubGram вернул некорректный JSON: HTTP %s", response.status)
+                        return {"status": "error", "message": "Некорректный ответ SubGram"}
                     print(f"🔍 SubGram ответ для {user_id}: {data}")
                     return data
                 else:
-                    print(f"❌ SubGram ошибка: {response.status}")
-                    return {"status": "error", "message": f"HTTP {response.status}"}
+                    # Текст ответа содержит причину (например, неверный тип ключа),
+                    # но никогда не логируем сам Auth-заголовок.
+                    print(f"❌ SubGram ошибка: HTTP {response.status}: {response_text[:500]}")
+                    return {"status": "error", "message": f"HTTP {response.status}: {response_text[:300]}"}
     except Exception as e:
         print(f"❌ SubGram исключение: {e}")
         return {"status": "error", "message": str(e)}

@@ -88,6 +88,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    # Telegram can deliver channel/service updates without an effective user.
+    # They must not crash the message handler (and should not affect sessions).
+    if user is None or update.message is None:
+        logging.info(
+            "Ignoring message update without user/message: update_id=%s",
+            update.update_id,
+        )
+        return
     user_id = user.id
 
     if user_id in reply_sessions:
@@ -495,10 +503,24 @@ async def start_reply_action(
 
 async def reply_anon_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    if query is None or query.from_user is None or query.message is None:
+        logging.warning(
+            "Ignoring malformed reply callback: update_id=%s",
+            update.update_id,
+        )
+        return
     data = query.data
     user_id = query.from_user.id
     chat_id = update.effective_chat.id
     original_message = query.message
+
+    logging.info(
+        "Reply callback received: update_id=%s data=%r user_id=%s chat_id=%s",
+        update.update_id,
+        data,
+        user_id,
+        chat_id,
+    )
 
     # ===== 1. ПРОВЕРКА SUBGRAM =====
     await query.answer("⏳ Проверяем подписки...")
@@ -576,7 +598,24 @@ async def subgram_callback_handler(update: Update, context: ContextTypes.DEFAULT
     except Exception as e:
         print(f"Не удалось удалить сообщение SubGram: {e}")
 
-    await query.answer("✅ Подписка подтверждена.")
+
+async def unknown_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Log callback data that has no registered handler."""
+    query = update.callback_query
+    if query is None:
+        return
+    logging.warning(
+        "Unhandled callback: update_id=%s data=%r user_id=%s chat_id=%s",
+        update.update_id,
+        query.data,
+        query.from_user.id if query.from_user else None,
+        query.message.chat_id if query.message else None,
+    )
+    await query.answer("Кнопка устарела. Откройте новое сообщение и попробуйте ещё раз.", show_alert=True)
+
+
+async def application_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logging.error("Unhandled Telegram update error: %s", context.error, exc_info=context.error)
 
 async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -972,6 +1011,8 @@ def main():
     app.add_handler(CallbackQueryHandler(buy_premium_handler, pattern="buy_premium"))
     app.add_handler(CallbackQueryHandler(confirm_unsubscribe_handler, pattern="confirm_unsubscribe"))
     app.add_handler(CallbackQueryHandler(cancel_unsubscribe_handler, pattern="cancel_unsubscribe"))
+    app.add_handler(CallbackQueryHandler(unknown_callback_handler))
+    app.add_error_handler(application_error_handler)
 
     print("🤖 Бот запущен и готов к приёму анонимных сообщений...")
     asyncio.set_event_loop(asyncio.new_event_loop())
