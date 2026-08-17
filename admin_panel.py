@@ -725,25 +725,49 @@ async def dashboard(request: Request):
 async def users_page(request: Request):
     rows = []
     total = 0
-    
+    page_size = 100
+    try:
+        page = max(1, int(request.query_params.get("page", "1")))
+    except (TypeError, ValueError):
+        page = 1
+
     try:
         conn = await database.get_conn()
         try:
-            rows = await conn.fetch("SELECT * FROM users ORDER BY registered_at DESC LIMIT 100")
-            total = len(rows)
+            total = int(await conn.fetchval("SELECT COUNT(*) FROM users") or 0)
+            total_pages = max(1, (total + page_size - 1) // page_size)
+            page = min(page, total_pages)
+            rows = await conn.fetch(
+                """
+                SELECT * FROM users
+                ORDER BY registered_at DESC NULLS LAST, telegram_id DESC
+                LIMIT $1 OFFSET $2
+                """,
+                page_size,
+                (page - 1) * page_size,
+            )
         finally:
             await database.release_conn(conn)
     except Exception as e:
         print(f"❌ Ошибка загрузки пользователей: {e}")
-    
+        total_pages = 1
+
     html = f'<div class="page-title">👥 Пользователи</div>'
     html += f'<div class="stats"><div class="stat-card"><div class="stat-number">{total}</div><div class="stat-label">Всего пользователей</div></div></div>'
-    
+
     if rows:
         html += '<div class="table-container"><table><tr><th>ID</th><th>Username</th><th>Имя</th><th>Регистрация</th></tr>'
         for row in rows:
-            html += f"<tr><td>{row['telegram_id']}</td><td>{row.get('username') or '-'}</td><td>{row.get('first_name') or '-'}</td><td>{row.get('registered_at').strftime('%d.%m.%Y %H:%M') if row.get('registered_at') else '-'}</td></tr>"
+            username = escape(str(row.get('username') or '-'))
+            first_name = escape(str(row.get('first_name') or '-'))
+            registered_at = row.get('registered_at')
+            registered_text = registered_at.strftime('%d.%m.%Y %H:%M') if registered_at else '-'
+            html += f"<tr><td>{row['telegram_id']}</td><td>{username}</td><td>{first_name}</td><td>{registered_text}</td></tr>"
         html += '</table></div>'
+        if total_pages > 1:
+            previous = f'<a class="button button-secondary" href="/users?page={page - 1}">← Предыдущая</a>' if page > 1 else ''
+            next_page = f'<a class="button button-secondary" href="/users?page={page + 1}">Следующая →</a>' if page < total_pages else ''
+            html += f'<div class="page-actions" style="justify-content:space-between;margin-top:16px;"><span class="panel-copy">Страница {page} из {total_pages}</span><div style="display:flex;gap:8px;">{previous}{next_page}</div></div>'
     else:
         html += '<div class="empty">😕 Пользователей пока нет</div>'
     
