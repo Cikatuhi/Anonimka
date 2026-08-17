@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import JSONResponse
 import json
 import logging
 from datetime import datetime, timedelta
+from urllib.parse import parse_qsl
 from subscription import SubscriptionManager
 from time_utils import now_msk
 import database
@@ -29,32 +31,93 @@ def plan_from_amount(amount_rub) -> str | None:
     return None
 
 
+def _as_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def _read_cloudpayments_payload(request: Request) -> dict:
+    """Accept both the legacy JSON envelope and native CloudPayments POSTs.
+
+    CloudPayments sends the payload as a flat form when the notification
+    format is set to ``CloudPayments``.  Older deployments of this project
+    expected a JSON object containing ``EventType`` and ``Model``.
+    """
+    raw_body = await request.body()
+    if not raw_body:
+        return {}
+
+    content_type = request.headers.get("content-type", "").lower()
+    if "application/json" in content_type:
+        payload = json.loads(raw_body)
+        if not isinstance(payload, dict):
+            raise ValueError("Webhook JSON must be an object")
+        return payload
+
+    return dict(parse_qsl(raw_body.decode("utf-8"), keep_blank_values=True))
+
+
+def _normalise_cloudpayments_payload(body: dict) -> tuple[str | None, dict]:
+    """Return event type and payment model for either supported format."""
+    model = body.get("Model")
+    if isinstance(model, str):
+        try:
+            model = json.loads(model)
+        except json.JSONDecodeError:
+            model = None
+
+    if not isinstance(model, dict):
+        model = body
+
+    event_type = body.get("EventType") or body.get("Type")
+    return str(event_type).strip().lower() if event_type else None, model
+
+
 @router.post("/webhook")
 async def handle_webhook(request: Request):
     try:
-        body = await request.json()
-        safe_model = body.get("Model") or {}
-        logger.info(
-            "Received webhook: event_type=%s transaction_id=%s account_id=%s status=%s is_recurrent=%s",
-            body.get("EventType"),
-            safe_model.get("TransactionId"),
-            safe_model.get("AccountId"),
-            safe_model.get("Status"),
-            safe_model.get("IsRecurrent", False),
-        )
-
-        event_type = body.get("EventType")
-        if event_type not in ["Payment", "Recurrent"]:
-            return {"status": "ignored"}
-
-        model = body.get("Model", {})
+        body = await _read_cloudpayments_payload(request)
+        event_type, model = _normalise_cloudpayments_payload(body)
 
         account_id = model.get("AccountId")
         status = model.get("Status")
         amount_rub = model.get("Amount", 0)
-        is_recurrent = model.get("IsRecurrent", False)
+        transaction_id = model.get("TransactionId")
+        is_recurrent = _as_bool(model.get("IsRecurrent", False))
+
+        logger.info(
+            "Received webhook: event_type=%s transaction_id=%s account_id=%s status=%s is_recurrent=%s",
+            event_type or "pay",
+            transaction_id,
+            account_id,
+            status,
+            is_recurrent,
+        )
+
+        # A Pay notification in native CloudPayments format has no EventType:
+        # the event is identified by the configured callback URL.  Ignore
+        # explicitly unrelated events, but acknowledge them to prevent retries.
+        if event_type not in {None, "payment", "pay", "recurrent"}:
+            return JSONResponse({"code": 0, "status": "ignored"})
+
         card_token = model.get("Token")
         subscription_id = model.get("SubscriptionId")
+
+        # Token charges are reported through Pay.  Some CloudPayments payloads
+        # do not flag them as IsRecurrent, so classify a pending retry_low
+        # subscription by its server-side state rather than by the form format.
+        if (
+            not is_recurrent
+            and account_id
+            and transaction_id is not None
+            and status == "Completed"
+        ):
+            try:
+                existing = await database.get_subscription_by_user_id(int(account_id))
+                is_recurrent = bool(existing and existing.get("status") == "retry_low")
+            except (TypeError, ValueError):
+                is_recurrent = False
 
         # Recurrent payments must be processed by SubscriptionManager first.
         # Do not let the generic successful-payment handler below overwrite
@@ -64,7 +127,7 @@ async def handle_webhook(request: Request):
                 "AccountId": account_id,
                 "Amount": amount_rub,
                 "Status": status,
-                "TransactionId": model.get("TransactionId"),
+                "TransactionId": transaction_id,
                 "SubscriptionId": subscription_id,
                 "IsRecurrent": True,
                 "ReasonCode": model.get("ReasonCode"),
@@ -76,7 +139,7 @@ async def handle_webhook(request: Request):
                 f"Recurrent payment processed for user {account_id}: "
                 f"{result.get('message', '')}"
             )
-            return {"status": "processed", "result": result}
+            return JSONResponse({"code": 0, "status": "processed"})
 
         # Initial successful payment: this is the only generic webhook path
         # that establishes HIGH access regardless of the amount field.
@@ -118,20 +181,20 @@ async def handle_webhook(request: Request):
                     logger.info(f"Created subscription for user {user_id}")
 
                 await database.remove_from_unsubscribed(user_id)
-                return {"status": "ok", "message": "Subscription activated"}
+                return JSONResponse({"code": 0, "status": "ok"})
 
             except Exception as e:
                 logger.error(f"Subscription activation error: {e}")
-                return {"status": "error", "message": str(e)}
+                return JSONResponse({"code": 0, "status": "error"})
 
-        return {"status": "ok"}
+        return JSONResponse({"code": 0, "status": "ok"})
 
-    except json.JSONDecodeError:
-        logger.error("Invalid JSON received")
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+        logger.error("Invalid webhook payload received")
+        raise HTTPException(status_code=400, detail="Invalid webhook payload")
     except Exception as e:
         logger.error(f"Error processing webhook: {e}", exc_info=True)
-        return {"status": "error", "message": str(e)}
+        return JSONResponse({"code": 0, "status": "error"})
 
 
 @router.post("/subscription/init")

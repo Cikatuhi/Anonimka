@@ -5,6 +5,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def env_flag(name: str, default: bool) -> bool:
+    """Read a conventional true/false environment flag."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass
 class Config:
 
@@ -26,7 +35,13 @@ class Config:
     BILLING_INTERVAL_DAYS: int = 1
     
     WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "https://your-domain.com/webhook")
-    
+
+    # Lets the HTTP service accept CloudPayments notifications while manual
+    # reconciliation is in progress, without running any automatic charges.
+    PAYMENT_SCHEDULER_ENABLED: bool = field(
+        default_factory=lambda: env_flag("PAYMENT_SCHEDULER_ENABLED", True)
+    )
+
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", 8000))
 
