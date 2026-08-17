@@ -99,7 +99,10 @@ async def handle_webhook(request: Request):
         # the event is identified by the configured callback URL.  Ignore
         # explicitly unrelated events, but acknowledge them to prevent retries.
         if event_type not in {None, "payment", "pay", "recurrent"}:
-            return JSONResponse({"code": 0, "status": "ignored"})
+            # CloudPayments expects the acknowledgement body to be exactly
+            # the documented JSON response.  Keep internal details in logs,
+            # not in the callback response.
+            return JSONResponse({"code": 0})
 
         card_token = model.get("Token")
         subscription_id = model.get("SubscriptionId")
@@ -139,7 +142,7 @@ async def handle_webhook(request: Request):
                 f"Recurrent payment processed for user {account_id}: "
                 f"{result.get('message', '')}"
             )
-            return JSONResponse({"code": 0, "status": "processed"})
+            return JSONResponse({"code": 0})
 
         # Initial successful payment: this is the only generic webhook path
         # that establishes HIGH access regardless of the amount field.
@@ -181,20 +184,20 @@ async def handle_webhook(request: Request):
                     logger.info(f"Created subscription for user {user_id}")
 
                 await database.remove_from_unsubscribed(user_id)
-                return JSONResponse({"code": 0, "status": "ok"})
+                return JSONResponse({"code": 0})
 
             except Exception as e:
                 logger.error(f"Subscription activation error: {e}")
-                return JSONResponse({"code": 0, "status": "error"})
+                return JSONResponse({"code": 0})
 
-        return JSONResponse({"code": 0, "status": "ok"})
+        return JSONResponse({"code": 0})
 
     except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
         logger.error("Invalid webhook payload received")
         raise HTTPException(status_code=400, detail="Invalid webhook payload")
     except Exception as e:
         logger.error(f"Error processing webhook: {e}", exc_info=True)
-        return JSONResponse({"code": 0, "status": "error"})
+        return JSONResponse({"code": 0})
 
 
 @router.post("/subscription/init")
