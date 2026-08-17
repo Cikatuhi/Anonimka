@@ -75,24 +75,30 @@ async def lifespan(app: FastAPI):
     finally:
         await database.release_conn(conn)
 
-    scheduler.add_job(
-        process_expired_subscriptions_job,
-        trigger=IntervalTrigger(minutes=5),
-        id="process_expired",
-        replace_existing=True
-    )
+    if config.PAYMENT_SCHEDULER_ENABLED:
+        scheduler.add_job(
+            process_expired_subscriptions_job,
+            trigger=IntervalTrigger(minutes=5),
+            id="process_expired",
+            replace_existing=True
+        )
+        scheduler.start()
+        logger.info("🚀 Scheduler started")
+        logger.info("  - Expired ACTIVE check: every 5 minutes")
+        logger.info("  - RETRY_LOW: handled by the same 5-minute check, but only when next_retry_at <= NOW()")
+    else:
+        logger.warning(
+            "🛡️ PAYMENT_SCHEDULER_ENABLED=false: webhook API is active; automatic charges are disabled"
+        )
 
-    scheduler.start()
-    logger.info("🚀 Scheduler started")
-    logger.info("  - Expired ACTIVE check: every 5 minutes")
-    logger.info("  - RETRY_LOW: handled by the same 5-minute check, but only when next_retry_at <= NOW()")
     logger.info("  - Subscription extension: webhook only")
     logger.info("  - Recurrent webhook idempotency: payment_events.transaction_id UNIQUE")
 
     yield
 
-    scheduler.shutdown()
-    logger.info("🛑 Scheduler stopped")
+    if scheduler.running:
+        scheduler.shutdown()
+        logger.info("🛑 Scheduler stopped")
 
 
 app = FastAPI(
@@ -127,6 +133,7 @@ async def health_check():
     retry_low_users = await subscription_manager.get_all_users_in_retry_low()
     return {
         "status": "healthy",
+        "scheduler_enabled": config.PAYMENT_SCHEDULER_ENABLED,
         "scheduler_running": scheduler.running,
         "retry_low_count": len(retry_low_users)
     }
