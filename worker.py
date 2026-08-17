@@ -349,6 +349,10 @@ async def process_job(job):
                     )
                 except Exception as exc:
                     await record_recipient_result(job_id, user_id, "failed", "exception", str(exc))
+                finally:
+                    # Keep broadcast traffic below Telegram's global limit.
+                    # 40 ms between attempts is at most 25 attempts per second.
+                    await asyncio.sleep(0.04)
 
             await sync_job_counts(job_id)
 
