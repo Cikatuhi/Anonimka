@@ -822,18 +822,95 @@ async def messages_page(request: Request):
 
 @app.get("/subscriptions", response_class=HTMLResponse)
 async def subscriptions_page(request: Request):
-    total_active = 0
+    page_size = 100
+    page = 1
+    total_records = 0
+    total_users = 0
+    status_counts = {}
     rows = []
-    
+
     try:
-        total_active = await database.count_active_subscriptions()
-        rows = await database.get_all_subscriptions(limit=200)
+        page = max(1, int(request.query_params.get("page", "1")))
+    except (TypeError, ValueError):
+        page = 1
+
+    try:
+        conn = await database.get_conn()
+        try:
+            total_records = int(await conn.fetchval(
+                "SELECT COUNT(*) FROM subscriptions"
+            ) or 0)
+            total_users = int(await conn.fetchval(
+                "SELECT COUNT(DISTINCT user_id) FROM subscriptions"
+            ) or 0)
+            status_rows = await conn.fetch(
+                """
+                SELECT status,
+                       COUNT(*) AS records,
+                       COUNT(DISTINCT user_id) AS users,
+                       COUNT(*) FILTER (
+                           WHERE status = 'active'
+                             AND (end_date IS NULL OR end_date > NOW())
+                       ) AS current_records,
+                       COUNT(DISTINCT user_id) FILTER (
+                           WHERE status = 'active'
+                             AND (end_date IS NULL OR end_date > NOW())
+                       ) AS current_users
+                FROM subscriptions
+                GROUP BY status
+                ORDER BY status
+                """
+            )
+            status_counts = {
+                str(row["status"] or "unknown"): {
+                    "records": int(row["records"] or 0),
+                    "users": int(row["users"] or 0),
+                    "current_records": int(row["current_records"] or 0),
+                    "current_users": int(row["current_users"] or 0),
+                }
+                for row in status_rows
+            }
+        finally:
+            await database.release_conn(conn)
+
+        total_pages = max(1, (total_records + page_size - 1) // page_size)
+        page = min(page, total_pages)
+        rows = await database.get_all_subscriptions(
+            limit=page_size,
+            offset=(page - 1) * page_size,
+        )
     except Exception as e:
         print(f"❌ Ошибка загрузки подписок: {e}")
-    
+
+        total_pages = 1
+
+    active_users = status_counts.get("active", {}).get("current_users", 0)
+    retry_low_users = status_counts.get("retry_low", {}).get("users", 0)
+
     html = f'<div class="page-title">📋 Подписки</div>'
-    html += f'<div class="stats"><div class="stat-card"><div class="stat-number">{total_active}</div><div class="stat-label">Активных подписок</div></div></div>'
-    
+    html += f'''
+    <div class="stats">
+        <div class="stat-card"><div class="stat-number">{total_users}</div><div class="stat-label">Уникальных пользователей</div></div>
+        <div class="stat-card"><div class="stat-number">{total_records}</div><div class="stat-label">Всего записей подписок</div></div>
+        <div class="stat-card"><div class="stat-number">{active_users}</div><div class="stat-label">Действующих active</div></div>
+        <div class="stat-card"><div class="stat-number">{retry_low_users}</div><div class="stat-label">Ожидают повторной оплаты</div></div>
+    </div>
+    '''
+
+    if status_counts:
+        status_labels = {
+            "active": "active",
+            "retry_low": "retry_low",
+            "pending": "pending",
+            "cancelled": "cancelled",
+            "expired": "expired",
+        }
+        summary = " · ".join(
+            f"{escape(status_labels.get(status, status))}: {data['users']} польз."
+            for status, data in status_counts.items()
+        )
+        html += f'<p class="panel-copy" style="margin:0 0 16px;">По статусам: {summary}</p>'
+
     if rows:
         html += '''
         <div class="table-container">
@@ -849,13 +926,14 @@ async def subscriptions_page(request: Request):
                 </tr>
         '''
         for row in rows:
-            status_color = "#7c3aed" if row['status'] == 'active' else "#ff4488"
+            raw_status = str(row.get('status') or 'unknown')
+            status_color = "#7c3aed" if raw_status == 'active' else "#ff4488"
             end_date_str = row['end_date'].strftime('%d.%m.%Y') if row['end_date'] else '∞'
-            
+
             block_btn = ''
-            if row['status'] in ['active', 'pending']:
+            if raw_status in ['active', 'pending']:
                 block_btn = f'''
-                <button onclick="blockSubscription({row['user_id']})" 
+                <button onclick="blockSubscription({row['user_id']})"
                         style="padding:4px 12px; border:1px solid #ff4488; border-radius:6px; background:transparent; color:#ff4488; cursor:pointer; font-size:11px;">
                     🚫 Заблокировать
                 </button>
@@ -864,16 +942,22 @@ async def subscriptions_page(request: Request):
             html += f'''
             <tr>
                 <td>{row['id']}</td>
-                <td>@{row.get('username') or row.get('first_name') or row['user_id']}</td>
-                <td>{row['plan']}</td>
+                <td>@{escape(str(row.get('username') or row.get('first_name') or row['user_id']))}</td>
+                <td>{escape(str(row.get('plan') or '-'))}</td>
                 <td>{row['start_date'].strftime('%d.%m.%Y') if row['start_date'] else '-'}</td>
                 <td>{end_date_str}</td>
-                <td><span style="color:{status_color};">{row['status']}</span></td>
+                <td><span style="color:{status_color};">{escape(raw_status)}</span></td>
                 <td>{block_btn}</td>
             </tr>
             '''
         html += '</table></div>'
-        
+
+        first_item = (page - 1) * page_size + 1
+        last_item = min(page * page_size, total_records)
+        previous = f'<a class="button button-secondary" href="/subscriptions?page={page - 1}">← Предыдущая</a>' if page > 1 else ''
+        next_page = f'<a class="button button-secondary" href="/subscriptions?page={page + 1}">Следующая →</a>' if page < total_pages else ''
+        html += f'<div class="page-actions" style="justify-content:space-between;margin-top:16px;"><span class="panel-copy">Показаны записи {first_item}–{last_item} из {total_records} · страница {page} из {total_pages}</span><div style="display:flex;gap:8px;">{previous}{next_page}</div></div>'
+
         html += '''
         <script>
             async function blockSubscription(userId) {
