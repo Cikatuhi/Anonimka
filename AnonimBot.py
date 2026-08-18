@@ -44,6 +44,18 @@ def build_welcome_message(deep_link: str) -> tuple[str, list[MessageEntity]]:
     return text, entities
 
 
+def animated_valentine_entities() -> list[MessageEntity]:
+    """Return the entity that animates the leading valentine emoji."""
+    return [
+        MessageEntity(
+            type="custom_emoji",
+            offset=0,
+            length=2,
+            custom_emoji_id=VALENTINE_CUSTOM_EMOJI_ID,
+        )
+    ]
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
@@ -138,29 +150,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if update.message.text:
                 content = update.message.text
                 content_type = "text"
+                reply_text = f"💌 Вам пришёл анонимный ответ:\n\n{content}"
                 await context.bot.send_message(
                     chat_id=original_sender_id,
-                    text=f"✉️ Вам пришёл анонимный ответ:\n\n{content}",
+                    text=reply_text,
+                    entities=animated_valentine_entities(),
                     reply_markup=reply_markup
                 )
             elif update.message.photo:
                 content_type = "photo"
                 content = update.message.caption or "фото"
                 photo = update.message.photo[-1].file_id
+                reply_caption = f"💌 Вам пришёл анонимный ответ:\n\n{content}"
                 await context.bot.send_photo(
                     chat_id=original_sender_id,
                     photo=photo,
-                    caption=f"✉️ Вам пришёл анонимный ответ:\n\n{content}",
+                    caption=reply_caption,
+                    caption_entities=animated_valentine_entities(),
                     reply_markup=reply_markup
                 )
             elif update.message.video:
                 content_type = "video"
                 content = update.message.caption or "видео"
                 video = update.message.video.file_id
+                reply_caption = f"💌 Вам пришёл анонимный ответ:\n\n{content}"
                 await context.bot.send_video(
                     chat_id=original_sender_id,
                     video=video,
-                    caption=f"✉️ Вам пришёл анонимный ответ:\n\n{content}",
+                    caption=reply_caption,
+                    caption_entities=animated_valentine_entities(),
                     reply_markup=reply_markup
                 )
             elif update.message.voice:
@@ -170,7 +188,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_voice(
                     chat_id=original_sender_id,
                     voice=voice,
-                    caption="✉️ Вам пришёл анонимный ответ (голосовое)",
+                    caption="💌 Вам пришёл анонимный ответ (голосовое)",
+                    caption_entities=animated_valentine_entities(),
                     reply_markup=reply_markup
                 )
             elif update.message.video_note:
@@ -188,7 +207,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sticker = update.message.sticker.file_id
                 await context.bot.send_message(
                     chat_id=original_sender_id,
-                    text="✉️ Вам пришёл анонимный ответ (стикер):",
+                    text="💌 Вам пришёл анонимный ответ (стикер):",
+                    entities=animated_valentine_entities(),
                     reply_markup=reply_markup
                 )
                 await context.bot.send_sticker(
@@ -280,29 +300,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message.text:
             content = update.message.text
             content_type = "text"
+            message_text = f"💌 Вам пришло анонимное сообщение:\n\n{content}"
             await context.bot.send_message(
                 chat_id=recipient_id,
-                text=f"✉️ Вам пришло анонимное сообщение:\n\n{content}",
+                text=message_text,
+                entities=animated_valentine_entities(),
                 reply_markup=reply_markup
             )
         elif update.message.photo:
             content_type = "photo"
             content = update.message.caption or "фото"
             photo = update.message.photo[-1].file_id
+            message_caption = f"💌 Вам пришло анонимное фото:\n\n{content}"
             await context.bot.send_photo(
                 chat_id=recipient_id,
                 photo=photo,
-                caption=f"✉️ Вам пришло анонимное фото:\n\n{content}",
+                caption=message_caption,
+                caption_entities=animated_valentine_entities(),
                 reply_markup=reply_markup
             )
         elif update.message.video:
             content_type = "video"
             content = update.message.caption or "видео"
             video = update.message.video.file_id
+            message_caption = f"💌 Вам пришло анонимное видео:\n\n{content}"
             await context.bot.send_video(
                 chat_id=recipient_id,
                 video=video,
-                caption=f"✉️ Вам пришло анонимное видео:\n\n{content}",
+                caption=message_caption,
+                caption_entities=animated_valentine_entities(),
                 reply_markup=reply_markup
             )
         elif update.message.voice:
@@ -312,7 +338,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_voice(
                 chat_id=recipient_id,
                 voice=voice,
-                caption="✉️ Вам пришло анонимное голосовое сообщение",
+                caption="💌 Вам пришло анонимное голосовое сообщение",
+                caption_entities=animated_valentine_entities(),
                 reply_markup=reply_markup
             )
         elif update.message.video_note:
@@ -330,7 +357,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sticker = update.message.sticker.file_id
             await context.bot.send_message(
                 chat_id=recipient_id,
-                text="✉️ Вам пришёл анонимный стикер:",
+                text="💌 Вам пришёл анонимный стикер:",
+                entities=animated_valentine_entities(),
                 reply_markup=reply_markup
             )
             await context.bot.send_sticker(

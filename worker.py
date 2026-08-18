@@ -14,6 +14,7 @@ STALE_AFTER_MINUTES = 15
 MAX_SEND_ATTEMPTS = 3
 RETRY_BASE_SECONDS = 1.0
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+VALENTINE_CUSTOM_EMOJI_ID = "5472019095106886003"
 
 
 async def send_telegram_message(client, user_id: int, message_text: str, keyboard: dict):
@@ -276,7 +277,8 @@ async def sync_job_counts(job_id: int, final_status: str | None = None):
 async def process_job(job):
     job_id = job["id"]
     message_text = (
-        "✉️ Вам пришло анонимное сообщение:\n\n"
+        f'<tg-emoji emoji-id="{VALENTINE_CUSTOM_EMOJI_ID}">💌</tg-emoji> '
+        "Вам пришло анонимное сообщение:\n\n"
         f"{html.escape(str(job['message']), quote=False)}"
     )
     keyboard = {
