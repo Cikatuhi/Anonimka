@@ -646,7 +646,7 @@ async def payment_page(user_id: int, request: Request):
                                 primaryHoverButtonColor: "#e78ca5",
                                 primaryButtonTextColor: "#ffffff",
                                 primaryButtonHoverTextColor: "#ffffff",
-                                activeInputColor: "#ed9ab2",
+                                activeInputColor: "#242424",
                                 inputBackground: "#ffffff",
                                 inputColor: "#242424",
                                 inputBorderColor: "#eeeeee",
