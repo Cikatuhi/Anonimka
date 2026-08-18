@@ -649,8 +649,8 @@ async def payment_page(user_id: int, request: Request):
                                 inputBackground: "#ffffff",
                                 inputColor: "#242424",
                                 inputBorderColor: "#eeeeee",
-                                titleColor: "#6f6f6f",
-                                textColor: "#6f6f6f",
+                                titleColor: "#242424",
+                                textColor: "#242424",
                                 errorColor: "#ef4444"
                             }},
                             borders: {{
