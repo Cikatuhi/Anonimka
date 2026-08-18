@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, Optional, List
 from datetime import datetime, timedelta
-from time_utils import now_msk
+from time_utils import now_msk, to_db_timestamp
 import sys
 
 sys.path.append('/root/Anonimno-Artem-')
@@ -466,7 +466,7 @@ class SubscriptionManager:
                             next_retry_at = NULL
                         WHERE user_id = $3
                         """,
-                        end_date,
+                        to_db_timestamp(end_date),
                         next_plan,
                         int(user_id),
                     )

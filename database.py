@@ -9,6 +9,7 @@ import asyncio
 import ssl
 from contextlib import asynccontextmanager
 import aiohttp
+from time_utils import to_db_timestamp
 
 load_dotenv()
 
@@ -534,7 +535,7 @@ async def create_subscription(
             INSERT INTO subscriptions 
             (user_id, plan, status, end_date, card_token, subscription_id, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, NOW())
-        """, user_id, plan, status, end_date, card_token, subscription_id)
+        """, user_id, plan, status, to_db_timestamp(end_date), card_token, subscription_id)
     finally:
         await release_conn(conn)
 
@@ -542,7 +543,12 @@ async def update_subscription_status(user_id: int, status: str, end_date=None):
     conn = await get_conn()
     try:
         if end_date:
-            await conn.execute("UPDATE subscriptions SET status = $1, end_date = $2 WHERE user_id = $3", status, end_date, user_id)
+            await conn.execute(
+                "UPDATE subscriptions SET status = $1, end_date = $2 WHERE user_id = $3",
+                status,
+                to_db_timestamp(end_date),
+                user_id,
+            )
         else:
             await conn.execute("UPDATE subscriptions SET status = $1 WHERE user_id = $2", status, user_id)
     finally:
@@ -552,7 +558,12 @@ async def update_subscription_plan(user_id: int, plan: str, end_date=None):
     conn = await get_conn()
     try:
         if end_date:
-            await conn.execute("UPDATE subscriptions SET plan = $1, end_date = $2 WHERE user_id = $3", plan, end_date, user_id)
+            await conn.execute(
+                "UPDATE subscriptions SET plan = $1, end_date = $2 WHERE user_id = $3",
+                plan,
+                to_db_timestamp(end_date),
+                user_id,
+            )
         else:
             await conn.execute("UPDATE subscriptions SET plan = $1 WHERE user_id = $2", plan, user_id)
     finally:

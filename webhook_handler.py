@@ -89,6 +89,13 @@ async def handle_webhook(request: Request):
             raw_reason_code = body.get("ReasonCode")
         reason_code = _normalise_reason_code(raw_reason_code)
         is_recurrent = _as_bool(model.get("IsRecurrent", False))
+        invoice_id = model.get("InvoiceId") or body.get("InvoiceId")
+
+        # Token charges created by this project use a stable invoice prefix.
+        # CloudPayments normally supplies IsRecurrent, but some Pay
+        # notifications omit it while retaining InvoiceId.
+        if not is_recurrent and str(invoice_id or "").startswith("sub_"):
+            is_recurrent = True
 
         logger.info(
             "Received webhook: event_type=%s transaction_id=%s account_id=%s status=%s is_recurrent=%s",
@@ -114,7 +121,7 @@ async def handle_webhook(request: Request):
         # Token charges are reported through Pay.  Some CloudPayments payloads
         # do not flag them as IsRecurrent, so classify a pending retry_low
         # subscription by its server-side state rather than by the form format.
-        if not is_recurrent and account_id and transaction_id is not None:
+        if not is_recurrent and status != "Completed" and account_id and transaction_id is not None:
             try:
                 existing = await database.get_subscription_by_user_id(int(account_id))
                 is_recurrent = bool(

@@ -4,7 +4,7 @@ import os
 import random
 from datetime import datetime
 from dotenv import load_dotenv
-from time_utils import now_msk
+from time_utils import as_utc, now_msk
 from telegram import MessageEntity, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 import database
@@ -719,7 +719,9 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if row:
         status = row['status']
         end_date = row['end_date']
-        if status == 'active' and (end_date is None or end_date > now_msk()):
+        if status == 'active' and (
+            end_date is None or as_utc(end_date) > as_utc(now_msk())
+        ):
             is_active = True
             print(f"✅ Подписка АКТИВНА для {user_id}!")
         else:
