@@ -21,6 +21,7 @@ MAX_SESSIONS = 1000
 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "7683869901"))
 VALENTINE_CUSTOM_EMOJI_ID = "5472019095106886003"
+ANONYMOUS_MESSAGE_HEADER = "Вам пришло новое анонимное сообщение!"
 # Telegram file IDs are bot-specific.  Keep the supplied bear as the default,
 # while allowing each bot instance to override it in its own .env file.
 WELCOME_STICKER_FILE_ID = os.getenv(
@@ -58,6 +59,19 @@ def animated_valentine_entities() -> list[MessageEntity]:
             offset=0,
             length=2,
             custom_emoji_id=VALENTINE_CUSTOM_EMOJI_ID,
+        )
+    ]
+
+
+def anonymous_message_entities() -> list[MessageEntity]:
+    """Animate the valentine and bold the incoming-message heading."""
+    header_offset = len("💌 ".encode("utf-16-le")) // 2
+    header_length = len(ANONYMOUS_MESSAGE_HEADER.encode("utf-16-le")) // 2
+    return animated_valentine_entities() + [
+        MessageEntity(
+            type="bold",
+            offset=header_offset,
+            length=header_length,
         )
     ]
 
@@ -306,11 +320,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message.text:
             content = update.message.text
             content_type = "text"
-            message_text = f"💌 Вам пришло анонимное сообщение:\n\n{content}"
+            message_text = f"💌 {ANONYMOUS_MESSAGE_HEADER}\n\n{content}"
             await context.bot.send_message(
                 chat_id=recipient_id,
                 text=message_text,
-                entities=animated_valentine_entities(),
+                entities=anonymous_message_entities(),
                 reply_markup=reply_markup
             )
         elif update.message.photo:

@@ -278,7 +278,7 @@ async def process_job(job):
     job_id = job["id"]
     message_text = (
         f'<tg-emoji emoji-id="{VALENTINE_CUSTOM_EMOJI_ID}">💌</tg-emoji> '
-        "Вам пришло анонимное сообщение:\n\n"
+        "<b>Вам пришло новое анонимное сообщение!</b>\n\n"
         f"{html.escape(str(job['message']), quote=False)}"
     )
     keyboard = {
