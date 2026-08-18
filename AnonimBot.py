@@ -122,15 +122,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     welcome_text, welcome_entities = build_welcome_message(deep_link)
 
-    share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
-    share_keyboard = [
-        [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
-    ]
-    reply_markup = InlineKeyboardMarkup(share_keyboard)
-
     await update.message.reply_text(
         welcome_text,
-        reply_markup=reply_markup,
         entities=welcome_entities,
         disable_web_page_preview=True
     )
@@ -250,15 +243,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             welcome_text, welcome_entities = build_welcome_message(deep_link)
 
-            share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
-            share_keyboard = [
-                [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
-            ]
-            share_reply_markup = InlineKeyboardMarkup(share_keyboard)
-
             await update.message.reply_text(
                 welcome_text,
-                reply_markup=share_reply_markup,
                 entities=welcome_entities,
                 disable_web_page_preview=True
             )
@@ -408,15 +394,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         welcome_text, welcome_entities = build_welcome_message(deep_link)
 
-        share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
-        share_keyboard = [
-            [InlineKeyboardButton("📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={deep_link}&text={share_text}")]
-        ]
-        share_reply_markup = InlineKeyboardMarkup(share_keyboard)
-
         await update.message.reply_text(
             welcome_text,
-            reply_markup=share_reply_markup,
             entities=welcome_entities,
             disable_web_page_preview=True
         )
