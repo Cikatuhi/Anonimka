@@ -483,7 +483,10 @@ async def add_blocked_user(user_id: int, username: str, first_name: str):
             "INSERT INTO blocked_users (telegram_id, username, first_name) VALUES ($1, $2, $3) ON CONFLICT (telegram_id) DO NOTHING",
             user_id, username, first_name
         )
-        await conn.execute("DELETE FROM users WHERE telegram_id = $1", user_id)
+        # Keep the users row intact.  subscriptions.user_id references users
+        # with ON DELETE CASCADE, so deleting the user here would also delete
+        # the subscription and its card token.  blocked_users is only an
+        # audience-control marker; it must never remove billing data.
     finally:
         await release_conn(conn)
 

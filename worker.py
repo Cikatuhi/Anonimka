@@ -320,6 +320,15 @@ async def process_job(job):
                     break
                 try:
                     await touch_service_heartbeat()
+                    # A recipient may have been marked blocked after the job
+                    # was created (or may belong to an older job whose
+                    # audience was captured before blocked_users filtering).
+                    # Mark it as blocked without calling Telegram.  This keeps
+                    # the job progressing while preserving the user's
+                    # subscription and billing data.
+                    if await database.is_user_blocked(user_id):
+                        await record_recipient_result(job_id, user_id, "blocked")
+                        continue
                     response = await send_telegram_message(
                         client,
                         user_id,

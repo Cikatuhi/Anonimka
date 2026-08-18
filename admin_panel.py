@@ -1655,6 +1655,11 @@ async def send_broadcast(request: Request, message: str = Form(...)):
                         FROM unsubscribed_users
                         WHERE unsubscribed_users.telegram_id = users.telegram_id
                     )
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM blocked_users
+                        WHERE blocked_users.telegram_id = users.telegram_id
+                    )
                     ON CONFLICT (job_id, user_id) DO NOTHING
                     """,
                     job_id,
