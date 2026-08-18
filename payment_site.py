@@ -613,7 +613,6 @@ async def payment_page(user_id: int, request: Request):
                     <h1>Узнайте, кто пишет вам анонимные сообщения — всего за 5 рублей!</h1>
                     <p class="lead">Вам доступна функция просмотра авторов анонимных сообщений.</p>
                     <div class="payment-shell">
-                        <h2 class="section-title">Оплатить картой</h2>
                         <div id="widget-container">
                             <div style="text-align:center; color:#9299a5; padding:20px;">Загрузка формы оплаты...</div>
                         </div>
