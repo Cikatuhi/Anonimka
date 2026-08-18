@@ -282,7 +282,12 @@ async def process_job(job):
     keyboard = {
         "inline_keyboard": [
             [{"text": "✍️ Ответить", "callback_data": "reply_anon"}],
-            [{"text": "👀 Узнать кто это", "callback_data": "who_is_it", "style": "primary"}],
+            [{
+                "text": "Узнать кто это",
+                "callback_data": "who_is_it",
+                "style": "primary",
+                "icon_custom_emoji_id": "5424885441100782420",
+            }],
         ]
     }
 

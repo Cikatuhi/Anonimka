@@ -104,9 +104,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_keyboard = [
                 [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
                 [InlineKeyboardButton(
-                    "👀 Узнать кто это",
+                    "Узнать кто это",
                     callback_data=f"who_is_it_{original_sender_id}",
-                    api_kwargs={"style": "primary"},
+                    api_kwargs={
+                        "style": "primary",
+                        "icon_custom_emoji_id": "5424885441100782420",
+                    },
                 )]
             ]
             reply_markup = InlineKeyboardMarkup(reply_keyboard)
@@ -247,9 +250,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_keyboard = [
             [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
             [InlineKeyboardButton(
-                "👀 Узнать кто это",
+                "Узнать кто это",
                 callback_data=f"who_is_it_{user_id}",
-                api_kwargs={"style": "primary"},
+                api_kwargs={
+                    "style": "primary",
+                    "icon_custom_emoji_id": "5424885441100782420",
+                },
             )]
         ]
         reply_markup = InlineKeyboardMarkup(reply_keyboard)
