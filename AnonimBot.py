@@ -5,7 +5,7 @@ import random
 from datetime import datetime
 from dotenv import load_dotenv
 from time_utils import now_msk
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import MessageEntity, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 import database
 
@@ -20,6 +20,28 @@ reply_sessions = {}
 MAX_SESSIONS = 1000
 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "7683869901"))
+VALENTINE_CUSTOM_EMOJI_ID = "5472019095106886003"
+
+
+def build_welcome_message(deep_link: str) -> tuple[str, list[MessageEntity]]:
+    """Build the welcome message with an animated custom valentine emoji."""
+    text = (
+        f"💌 Начните получать анонимные сообщения прямо сейчас!\n\n"
+        f"👉 Твоя ссылка:\n{deep_link}\n\n"
+        f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
+    )
+    heading = text.split("\n\n", 1)[0]
+    heading_length_utf16 = len(heading.encode("utf-16-le")) // 2
+    entities = [
+        MessageEntity(
+            type="custom_emoji",
+            offset=0,
+            length=2,
+            custom_emoji_id=VALENTINE_CUSTOM_EMOJI_ID,
+        ),
+        MessageEntity(type="bold", offset=0, length=heading_length_utf16),
+    ]
+    return text, entities
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -66,11 +88,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_username = context.bot.username
     deep_link = f"https://t.me/{bot_username}?start={user_id}"
 
-    welcome_text = (
-        f"<b>💌 Начните получать анонимные сообщения прямо сейчас!</b>\n\n"
-        f"👉 Твоя ссылка:\n{deep_link}\n\n"
-        f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
-    )
+    welcome_text, welcome_entities = build_welcome_message(deep_link)
 
     share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
     share_keyboard = [
@@ -81,7 +99,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         welcome_text,
         reply_markup=reply_markup,
-        parse_mode="HTML",
+        entities=welcome_entities,
         disable_web_page_preview=True
     )
 
@@ -190,11 +208,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bot_username = context.bot.username
             deep_link = f"https://t.me/{bot_username}?start={user_id}"
 
-            welcome_text = (
-                f"<b>💌 Начните получать анонимные сообщения прямо сейчас!</b>\n\n"
-                f"👉 Твоя ссылка:\n{deep_link}\n\n"
-                f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
-            )
+            welcome_text, welcome_entities = build_welcome_message(deep_link)
 
             share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
             share_keyboard = [
@@ -205,7 +219,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 welcome_text,
                 reply_markup=share_reply_markup,
-                parse_mode="HTML",
+                entities=welcome_entities,
                 disable_web_page_preview=True
             )
 
@@ -344,11 +358,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bot_username = context.bot.username
         deep_link = f"https://t.me/{bot_username}?start={user_id}"
 
-        welcome_text = (
-            f"<b>💌 Начните получать анонимные сообщения прямо сейчас!</b>\n\n"
-            f"👉 Твоя ссылка:\n{deep_link}\n\n"
-            f"💬 Поделитесь этой ссылкой в истории или в описании профиля, чтобы начать получать анонимные сообщения"
-        )
+        welcome_text, welcome_entities = build_welcome_message(deep_link)
 
         share_text = f"Отправь мне анонимное сообщение, по этой ссылке 👉"
         share_keyboard = [
@@ -359,7 +369,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             welcome_text,
             reply_markup=share_reply_markup,
-            parse_mode="HTML",
+            entities=welcome_entities,
             disable_web_page_preview=True
         )
 
