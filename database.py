@@ -267,6 +267,54 @@ async def record_payment_link_visit(user_id: int):
         await release_conn(conn)
 
 
+def _quote_identifier(identifier: str) -> str:
+    """Quote a PostgreSQL identifier returned from the system catalog."""
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+async def ensure_subscription_user_fk_protection(conn):
+    """Prevent deleting a user from cascading into subscription records.
+
+    Older installations created ``subscriptions.user_id`` with
+    ``ON DELETE CASCADE``.  Replace that relationship with ``RESTRICT`` once,
+    while leaving every existing row untouched.  The migration is idempotent
+    and also handles installations whose foreign-key constraint has a custom
+    name.
+    """
+    # Both the bot and payment service run startup migrations.  Serialize this
+    # one so two simultaneous starts cannot both try to recreate the constraint.
+    async with conn.transaction():
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext('anonimno.subscription-user-fk'))"
+        )
+        constraints = await conn.fetch(
+            """
+            SELECT conname, confdeltype
+            FROM pg_constraint
+            WHERE contype = 'f'
+              AND conrelid = to_regclass('subscriptions')
+              AND confrelid = to_regclass('users')
+            """
+        )
+
+        # ``r`` is RESTRICT and ``a`` is NO ACTION; both prevent a parent delete.
+        if constraints and all(row["confdeltype"] in ("r", "a") for row in constraints):
+            return
+
+        for row in constraints:
+            await conn.execute(
+                f"ALTER TABLE subscriptions DROP CONSTRAINT IF EXISTS {_quote_identifier(row['conname'])}"
+            )
+
+        await conn.execute(
+            """
+            ALTER TABLE subscriptions
+            ADD CONSTRAINT subscriptions_user_id_users_fkey_protected
+            FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE RESTRICT
+            """
+        )
+
+
 async def _ensure_core_schema(conn):
     """Apply additive migrations required by the current application.
 
@@ -286,6 +334,7 @@ async def _ensure_core_schema(conn):
     await conn.execute(
         "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE"
     )
+    await ensure_subscription_user_fk_protection(conn)
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS payment_events (
             id SERIAL PRIMARY KEY,
@@ -346,7 +395,7 @@ async def init_db():
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id SERIAL PRIMARY KEY,
-                user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE RESTRICT,
                 subscription_id TEXT,
                 card_token TEXT,
                 plan TEXT NOT NULL,
@@ -483,10 +532,8 @@ async def add_blocked_user(user_id: int, username: str, first_name: str):
             "INSERT INTO blocked_users (telegram_id, username, first_name) VALUES ($1, $2, $3) ON CONFLICT (telegram_id) DO NOTHING",
             user_id, username, first_name
         )
-        # Keep the users row intact.  subscriptions.user_id references users
-        # with ON DELETE CASCADE, so deleting the user here would also delete
-        # the subscription and its card token.  blocked_users is only an
-        # audience-control marker; it must never remove billing data.
+        # Keep the users row intact.  blocked_users is only an audience-control
+        # marker; it must never remove billing data.
     finally:
         await release_conn(conn)
 

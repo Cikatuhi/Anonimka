@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI):
             CREATE INDEX IF NOT EXISTS idx_subscriptions_next_retry_at
             ON subscriptions(next_retry_at)
         """)
+        await database.ensure_subscription_user_fk_protection(conn)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS payment_events (
                 id SERIAL PRIMARY KEY,
