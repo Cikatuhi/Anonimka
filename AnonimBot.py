@@ -21,6 +21,12 @@ MAX_SESSIONS = 1000
 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "7683869901"))
 VALENTINE_CUSTOM_EMOJI_ID = "5472019095106886003"
+# Telegram file IDs are bot-specific.  Keep the supplied bear as the default,
+# while allowing each bot instance to override it in its own .env file.
+WELCOME_STICKER_FILE_ID = os.getenv(
+    "WELCOME_STICKER_FILE_ID",
+    "CAACAgIAAxkBAAFSGDNqg_puYrZriYZSmgVGDnBvWUoeUgACAgEAAvcCyA9IZW0tb_MhnD0E",
+)
 
 
 def build_welcome_message(deep_link: str) -> tuple[str, list[MessageEntity]]:
@@ -56,6 +62,20 @@ def animated_valentine_entities() -> list[MessageEntity]:
     ]
 
 
+async def send_welcome_sticker(message) -> None:
+    """Send the large animated welcome sticker without breaking /start.
+
+    A file_id may belong to a different bot token on the second deployment.
+    In that case the configured instance can override WELCOME_STICKER_FILE_ID;
+    until then, keep /start usable with the original standalone emoji.
+    """
+    try:
+        await message.reply_sticker(sticker=WELCOME_STICKER_FILE_ID)
+    except Exception:
+        logging.exception("Не удалось отправить приветственный стикер")
+        await message.reply_text("💌")
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
@@ -67,7 +87,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await database.register_user(user_id, username, first_name)
 
-    await update.message.reply_text("💌")
+    await send_welcome_sticker(update.message)
 
     args = context.args
     if args:
