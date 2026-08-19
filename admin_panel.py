@@ -791,10 +791,20 @@ async def users_page(request: Request):
 @app.get("/messages", response_class=HTMLResponse)
 async def messages_page(request: Request):
     rows = []
-    
+    total = 0
+    page_size = 100
+    total_pages = 1
+    try:
+        page = max(1, int(request.query_params.get("page", "1")))
+    except (TypeError, ValueError):
+        page = 1
+
     try:
         conn = await database.get_conn()
         try:
+            total = int(await conn.fetchval("SELECT COUNT(*) FROM messages") or 0)
+            total_pages = max(1, (total + page_size - 1) // page_size)
+            page = min(page, total_pages)
             rows = await conn.fetch("""
                 SELECT m.id, m.content, m.content_type, m.created_at,
                        s.first_name as sender_name, s.username as sender_username,
@@ -802,8 +812,9 @@ async def messages_page(request: Request):
                 FROM messages m
                 LEFT JOIN users s ON m.sender_id = s.telegram_id
                 LEFT JOIN users r ON m.recipient_id = r.telegram_id
-                ORDER BY m.created_at DESC LIMIT 100
-            """)
+                ORDER BY m.created_at DESC NULLS LAST, m.id DESC
+                LIMIT $1 OFFSET $2
+            """, page_size, (page - 1) * page_size)
         finally:
             await database.release_conn(conn)
     except Exception as e:
@@ -826,6 +837,13 @@ async def messages_page(request: Request):
             </tr>
             '''
         html += '</table></div>'
+
+        first_item = (page - 1) * page_size + 1
+        last_item = min(page * page_size, total)
+        if total_pages > 1:
+            previous = f'<a class="button button-secondary" href="/messages?page={page - 1}">← Предыдущая</a>' if page > 1 else ''
+            next_page = f'<a class="button button-secondary" href="/messages?page={page + 1}">Следующая →</a>' if page < total_pages else ''
+            html += f'<div class="page-actions" style="justify-content:space-between;margin-top:16px;"><span class="panel-copy">Показаны записи {first_item}–{last_item} из {total} · страница {page} из {total_pages}</span><div style="display:flex;gap:8px;">{previous}{next_page}</div></div>'
     else:
         html += '<div class="empty">😕 Сообщений пока нет</div>'
     
