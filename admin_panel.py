@@ -625,7 +625,20 @@ async def dashboard(request: Request):
             stats = await conn.fetchrow(
                 """
                 SELECT
-                    (SELECT COUNT(*) FROM users) AS total_users,
+                    (
+                        SELECT COUNT(*)
+                        FROM users
+                        WHERE NOT EXISTS (
+                            SELECT 1
+                            FROM blocked_users
+                            WHERE blocked_users.telegram_id = users.telegram_id
+                        )
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM unsubscribed_users
+                            WHERE unsubscribed_users.telegram_id = users.telegram_id
+                        )
+                    ) AS total_users,
                     (SELECT COUNT(*) FROM messages) AS total_messages,
                     (
                         SELECT COUNT(*)
@@ -667,7 +680,7 @@ async def dashboard(request: Request):
         </div>
     </div>
     <div class="stats">
-        <div class="stat-card"><span class="icon">◎</span><div class="stat-number">{total_users}</div><div class="stat-label">Всего пользователей</div></div>
+        <div class="stat-card"><span class="icon">◎</span><div class="stat-number">{total_users}</div><div class="stat-label">Доступные пользователи</div></div>
         <div class="stat-card"><span class="icon">◇</span><div class="stat-number">{total_subscriptions}</div><div class="stat-label">Активные подписки</div></div>
         <div class="stat-card"><span class="icon">≋</span><div class="stat-number">{total_messages}</div><div class="stat-label">Сообщений отправлено</div></div>
         <div class="stat-card"><span class="icon">↗</span><div class="stat-number">{payment_visitors}</div><div class="stat-label">Перешли к оплате</div></div>
