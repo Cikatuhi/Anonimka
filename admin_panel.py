@@ -353,6 +353,8 @@ BASE_HTML = '''
         .main-shell { min-height: 100vh; margin-left: var(--sidebar-width); }
         .topbar { position: sticky; top: 0; z-index: 30; height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 32px; background: var(--topbar); border-bottom: 1px solid var(--topbar-line); backdrop-filter: blur(14px); }
         .topbar-context { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+        .samara-clock { color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .samara-clock-label { color: var(--muted); margin-right: 6px; }
         .topbar-actions { display: flex; align-items: center; gap: 16px; margin-left: auto; }
         .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #3ba77b; box-shadow: 0 0 0 4px rgba(59,167,123,.12); }
         .mobile-menu-button { display: none; width: 40px; height: 40px; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--button-surface); color: var(--ink); }
@@ -465,6 +467,7 @@ BASE_HTML = '''
             .form-container, .result-box, .panel { padding: 17px; }
             .detail-grid { grid-template-columns: 1fr; }
             .topbar-context span:last-child { display: none; }
+            .samara-clock-label { display: none; }
             .topbar-actions { gap: 10px; }
             .theme-toggle-label { display: none; }
             .theme-toggle { width: 40px; padding: 0; }
@@ -485,6 +488,9 @@ BASE_HTML = '''
             <button class="mobile-menu-button" id="mobile-menu-button" type="button" aria-label="Открыть меню">☰</button>
             <div class="topbar-actions">
                 <div class="topbar-context"><span class="live-dot"></span><span>Система работает</span></div>
+                <div class="samara-clock" id="samara-clock" aria-label="Текущее Самарское время">
+                    <span class="samara-clock-label">Самарское время</span><span id="samara-clock-value">--:--:--</span>
+                </div>
                 <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">
                     <span class="theme-toggle-icon" id="theme-toggle-icon" aria-hidden="true">☾</span>
                     <span class="theme-toggle-label" id="theme-toggle-label">Тёмная тема</span>
@@ -528,6 +534,20 @@ BASE_HTML = '''
                 renderThemeButton();
             });
             renderThemeButton();
+
+            const clock = document.getElementById('samara-clock-value');
+            const updateSamaraClock = () => {
+                if (!clock) return;
+                clock.textContent = new Intl.DateTimeFormat('ru-RU', {
+                    timeZone: 'Europe/Samara',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false,
+                }).format(new Date());
+            };
+            updateSamaraClock();
+            window.setInterval(updateSamaraClock, 1000);
         })();
     </script>
     </div>
@@ -862,7 +882,7 @@ async def users_page(request: Request):
     html += f'<div class="stats"><div class="stat-card"><div class="stat-number">{total}</div><div class="stat-label">Всего пользователей</div></div></div>'
 
     if rows:
-        html += '<div class="table-container"><table><tr><th>ID</th><th>Username</th><th>Имя</th><th>Регистрация (Самара)</th></tr>'
+        html += '<div class="table-container"><table><tr><th>ID</th><th>Username</th><th>Имя</th><th>Регистрация</th></tr>'
         for row in rows:
             username = escape(str(row.get('username') or '-'))
             first_name = escape(str(row.get('first_name') or '-'))
@@ -915,7 +935,7 @@ async def messages_page(request: Request):
     
     html = '<div class="page-title">💬 Сообщения</div>'
     if rows:
-        html += '<div class="table-container"><table><tr><th>ID</th><th>От</th><th>Кому</th><th>Тип</th><th>Сообщение</th><th>Дата (Самара)</th></tr>'
+        html += '<div class="table-container"><table><tr><th>ID</th><th>От</th><th>Кому</th><th>Тип</th><th>Сообщение</th><th>Дата</th></tr>'
         for row in rows:
             sender = row.get('sender_username') or row.get('sender_name') or 'Неизвестно'
             recipient = row.get('recipient_username') or row.get('recipient_name') or 'Неизвестно'
@@ -1043,8 +1063,8 @@ async def subscriptions_page(request: Request):
                     <th>ID</th>
                     <th>Пользователь</th>
                     <th>План</th>
-                    <th>Начало (Самара)</th>
-                    <th>Окончание (Самара)</th>
+                    <th>Начало</th>
+                    <th>Окончание</th>
                     <th>Статус</th>
                     <th>Действие</th>
                 </tr>
@@ -1137,7 +1157,7 @@ async def blocked_page(request: Request):
     html += f'<div class="stats"><div class="stat-card"><div class="stat-number">{total}</div><div class="stat-label">Заблокировали бота</div></div></div>'
     
     if rows:
-        html += '<div class="table-container"><table><tr><th>ID</th><th>Username</th><th>Имя</th><th>Заблокирован (Самара)</th></tr>'
+        html += '<div class="table-container"><table><tr><th>ID</th><th>Username</th><th>Имя</th><th>Заблокирован</th></tr>'
         for row in rows:
             html += f"<tr><td>{row['telegram_id']}</td><td>{row.get('username') or '-'}</td><td>{row.get('first_name') or '-'}</td><td>{format_admin_datetime(row['blocked_at'])}</td></tr>"
         html += '</table></div>'
@@ -1195,7 +1215,7 @@ async def unsubscribed_page(request: Request):
                     <th>ID</th>
                     <th>Username</th>
                     <th>Имя</th>
-                    <th>Дата отписки (Самара)</th>
+                    <th>Дата отписки</th>
                     <th>Причина</th>
                     <th>Токен</th>
                     <th>Действие</th>
@@ -2074,7 +2094,7 @@ async def broadcast_list(request: Request):
     '''
     
     if rows:
-        html += '<div class="table-container"><table><tr><th>ID</th><th>Статус</th><th>Всего</th><th>Отправлено</th><th>Ошибок</th><th>Прогресс</th><th>Создана (Самара)</th><th>Действие</th></tr>'
+        html += '<div class="table-container"><table><tr><th>ID</th><th>Статус</th><th>Всего</th><th>Отправлено</th><th>Ошибок</th><th>Прогресс</th><th>Создана</th><th>Действие</th></tr>'
         for row in rows:
             status_color = {
                 'pending': '#8899aa',
@@ -2329,7 +2349,7 @@ async def payment_link_visits_page(request: Request):
         html += '''
         <div class="table-container">
             <table>
-                <tr><th>Пользователь</th><th>Telegram ID</th><th>Переходов</th><th>Первый переход (Самара)</th><th>Последний переход (Самара)</th></tr>
+                <tr><th>Пользователь</th><th>Telegram ID</th><th>Переходов</th><th>Первый переход</th><th>Последний переход</th></tr>
         '''
         for row in rows:
             username = row.get("username")
@@ -2445,7 +2465,7 @@ async def payments_page(request: Request):
         html += '''
         <div class="table-container">
             <table>
-                <tr><th>Пользователь</th><th>Сумма</th><th>Статус</th><th>Дата (Самара)</th><th>TransactionId</th></tr>
+                <tr><th>Пользователь</th><th>Сумма</th><th>Статус</th><th>Дата</th><th>TransactionId</th></tr>
         '''
         for payment in payments:
             account_id = escape(str(payment.get("AccountId") or "—"))
