@@ -166,6 +166,22 @@ def format_admin_datetime(value, *, date_only: bool = False, include_seconds: bo
     return parsed.strftime("%d.%m.%Y %H:%M")
 
 
+def dashboard_day_start_utc_naive() -> datetime:
+    """Return today's Samara midnight in the UTC-naive format used by DB columns."""
+    samara_now = datetime.now(timezone.utc).astimezone(ADMIN_TIMEZONE)
+    samara_midnight = datetime.combine(
+        samara_now.date(),
+        time.min,
+        tzinfo=ADMIN_TIMEZONE,
+    )
+    return samara_midnight.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def format_dashboard_number(value) -> str:
+    """Format dashboard counters like the reference UI (space-separated thousands)."""
+    return f"{int(value or 0):,}".replace(",", " ")
+
+
 SUBSCRIPTION_STATUS_META = {
     "active": {
         "label": "Активна",
@@ -507,6 +523,7 @@ BASE_HTML = '''
         .stat-card:hover { border-color: var(--line-strong); box-shadow: var(--card-shadow-hover); }
         .stat-number { font-size: 29px; line-height: 1.1; font-weight: 770; color: var(--ink); letter-spacing: -.025em; }
         .stat-label { font-size: 12px; color: var(--muted); margin-top: 8px; }
+        .stat-today { margin-top: 10px; color: var(--muted); font-size: 12px; font-weight: 650; }
         .stat-card .icon { width: 30px; height: 30px; margin-bottom: 17px; display: grid; place-items: center; border-radius: 9px; background: var(--accent-soft); color: var(--accent-dark); font-size: 14px; }
         :root[data-theme="dark"] .stat-card:nth-child(1) { --card-accent: #42e0b4; --card-accent-soft: rgba(42, 205, 167, .14); --card-tint: rgba(24, 119, 108, .12); }
         :root[data-theme="dark"] .stat-card:nth-child(2) { --card-accent: #5da3ff; --card-accent-soft: rgba(72, 142, 255, .14); --card-tint: rgba(31, 78, 147, .12); }
@@ -887,21 +904,44 @@ async def dashboard_data():
                             WHERE unsubscribed_users.telegram_id = users.telegram_id
                         )
                     ) AS total_users,
+                    (
+                        SELECT COUNT(*)
+                        FROM users
+                        WHERE registered_at >= $1
+                          AND NOT EXISTS (
+                              SELECT 1 FROM blocked_users
+                              WHERE blocked_users.telegram_id = users.telegram_id
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1 FROM unsubscribed_users
+                              WHERE unsubscribed_users.telegram_id = users.telegram_id
+                          )
+                    ) AS users_today,
                     (SELECT COUNT(*) FROM messages) AS total_messages,
+                    (SELECT COUNT(*) FROM messages WHERE created_at >= $1) AS messages_today,
                     (
                         SELECT COUNT(*)
                         FROM subscriptions
                         WHERE status = 'active'
                           AND (end_date IS NULL OR end_date > NOW())
                     ) AS total_subscriptions,
+                    (
+                        SELECT COUNT(*)
+                        FROM subscriptions
+                        WHERE created_at >= $1
+                          AND status = 'active'
+                          AND (end_date IS NULL OR end_date > NOW())
+                    ) AS subscriptions_today,
                     (SELECT COUNT(*) FROM payment_link_visits) AS payment_visitors,
+                    (SELECT COUNT(*) FROM payment_link_visits WHERE first_visited_at >= $1) AS payment_visitors_today,
                     EXISTS (
                         SELECT 1
                         FROM service_heartbeats
                         WHERE service = 'worker'
                           AND heartbeat_at >= NOW() - INTERVAL '2 minutes'
                     ) AS worker_alive
-                """
+                """,
+                dashboard_day_start_utc_naive(),
             )
         finally:
             await database.release_conn(conn)
@@ -910,9 +950,13 @@ async def dashboard_data():
             content={
                 "ok": True,
                 "total_users": int(stats["total_users"] or 0),
+                "users_today": int(stats["users_today"] or 0),
                 "total_messages": int(stats["total_messages"] or 0),
+                "messages_today": int(stats["messages_today"] or 0),
                 "total_subscriptions": int(stats["total_subscriptions"] or 0),
+                "subscriptions_today": int(stats["subscriptions_today"] or 0),
                 "payment_visitors": int(stats["payment_visitors"] or 0),
+                "payment_visitors_today": int(stats["payment_visitors_today"] or 0),
                 "worker_alive": bool(stats["worker_alive"]),
             },
             headers={"Cache-Control": "no-store, max-age=0"},
@@ -968,9 +1012,13 @@ async def dashboard_events(request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     total_users = 0
+    users_today = 0
     total_messages = 0
+    messages_today = 0
     total_subscriptions = 0
+    subscriptions_today = 0
     payment_visitors = 0
+    payment_visitors_today = 0
     worker_alive = False
     
     try:
@@ -993,26 +1041,53 @@ async def dashboard(request: Request):
                             WHERE unsubscribed_users.telegram_id = users.telegram_id
                         )
                     ) AS total_users,
+                    (
+                        SELECT COUNT(*)
+                        FROM users
+                        WHERE registered_at >= $1
+                          AND NOT EXISTS (
+                              SELECT 1 FROM blocked_users
+                              WHERE blocked_users.telegram_id = users.telegram_id
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1 FROM unsubscribed_users
+                              WHERE unsubscribed_users.telegram_id = users.telegram_id
+                          )
+                    ) AS users_today,
                     (SELECT COUNT(*) FROM messages) AS total_messages,
+                    (SELECT COUNT(*) FROM messages WHERE created_at >= $1) AS messages_today,
                     (
                         SELECT COUNT(*)
                         FROM subscriptions
                         WHERE status = 'active'
                           AND (end_date IS NULL OR end_date > NOW())
                     ) AS total_subscriptions,
+                    (
+                        SELECT COUNT(*)
+                        FROM subscriptions
+                        WHERE created_at >= $1
+                          AND status = 'active'
+                          AND (end_date IS NULL OR end_date > NOW())
+                    ) AS subscriptions_today,
                     (SELECT COUNT(*) FROM payment_link_visits) AS payment_visitors,
+                    (SELECT COUNT(*) FROM payment_link_visits WHERE first_visited_at >= $1) AS payment_visitors_today,
                     EXISTS (
                         SELECT 1
                         FROM service_heartbeats
                         WHERE service = 'worker'
                           AND heartbeat_at >= NOW() - INTERVAL '2 minutes'
                     ) AS worker_alive
-                """
+                """,
+                dashboard_day_start_utc_naive(),
             )
             total_users = stats["total_users"]
+            users_today = stats["users_today"]
             total_messages = stats["total_messages"]
+            messages_today = stats["messages_today"]
             total_subscriptions = stats["total_subscriptions"]
+            subscriptions_today = stats["subscriptions_today"]
             payment_visitors = stats["payment_visitors"]
+            payment_visitors_today = stats["payment_visitors_today"]
             worker_alive = bool(stats["worker_alive"])
         finally:
             await database.release_conn(conn)
@@ -1034,10 +1109,10 @@ async def dashboard(request: Request):
         </div>
     </div>
     <div class="stats">
-        <div class="stat-card"><span class="icon">◎</span><div class="stat-number" id="dashboard-total-users">{total_users}</div><div class="stat-label">Доступные пользователи</div></div>
-        <div class="stat-card"><span class="icon">◇</span><div class="stat-number" id="dashboard-total-subscriptions">{total_subscriptions}</div><div class="stat-label">Активные подписки</div></div>
-        <div class="stat-card"><span class="icon">≋</span><div class="stat-number" id="dashboard-total-messages">{total_messages}</div><div class="stat-label">Сообщений отправлено</div></div>
-        <div class="stat-card"><span class="icon">↗</span><div class="stat-number" id="dashboard-payment-visitors">{payment_visitors}</div><div class="stat-label">Перешли к оплате</div></div>
+        <div class="stat-card"><span class="icon">◎</span><div class="stat-number" id="dashboard-total-users">{format_dashboard_number(total_users)}</div><div class="stat-label">Доступные пользователи</div><div class="stat-today" id="dashboard-users-today">+{format_dashboard_number(users_today)} за сегодня</div></div>
+        <div class="stat-card"><span class="icon">◇</span><div class="stat-number" id="dashboard-total-subscriptions">{format_dashboard_number(total_subscriptions)}</div><div class="stat-label">Активные подписки</div><div class="stat-today" id="dashboard-subscriptions-today">+{format_dashboard_number(subscriptions_today)} за сегодня</div></div>
+        <div class="stat-card"><span class="icon">≋</span><div class="stat-number" id="dashboard-total-messages">{format_dashboard_number(total_messages)}</div><div class="stat-label">Сообщений отправлено</div><div class="stat-today" id="dashboard-messages-today">+{format_dashboard_number(messages_today)} за сегодня</div></div>
+        <div class="stat-card"><span class="icon">↗</span><div class="stat-number" id="dashboard-payment-visitors">{format_dashboard_number(payment_visitors)}</div><div class="stat-label">Перешли к оплате</div><div class="stat-today" id="dashboard-payment-visitors-today">+{format_dashboard_number(payment_visitors_today)} за сегодня</div></div>
     </div>
     <div class="quick-grid">
         <section class="panel">
@@ -1086,9 +1161,13 @@ async def dashboard(request: Request):
                 const data = await response.json();
                 if (!data.ok) return;
                 document.getElementById('dashboard-total-users').textContent = data.total_users.toLocaleString('ru-RU');
+                document.getElementById('dashboard-users-today').textContent = '+' + data.users_today.toLocaleString('ru-RU') + ' за сегодня';
                 document.getElementById('dashboard-total-subscriptions').textContent = data.total_subscriptions.toLocaleString('ru-RU');
+                document.getElementById('dashboard-subscriptions-today').textContent = '+' + data.subscriptions_today.toLocaleString('ru-RU') + ' за сегодня';
                 document.getElementById('dashboard-total-messages').textContent = data.total_messages.toLocaleString('ru-RU');
+                document.getElementById('dashboard-messages-today').textContent = '+' + data.messages_today.toLocaleString('ru-RU') + ' за сегодня';
                 document.getElementById('dashboard-payment-visitors').textContent = data.payment_visitors.toLocaleString('ru-RU');
+                document.getElementById('dashboard-payment-visitors-today').textContent = '+' + data.payment_visitors_today.toLocaleString('ru-RU') + ' за сегодня';
                 const worker = document.getElementById('worker-health');
                 worker.textContent = data.worker_alive ? 'Работает' : 'Нет свежего сигнала';
                 worker.className = 'status-pill status-' + (data.worker_alive ? 'ok' : 'degraded');
