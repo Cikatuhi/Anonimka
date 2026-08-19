@@ -314,10 +314,12 @@ LOGIN_PAGE = '''
         (() => {
             try {
                 const savedTheme = localStorage.getItem('anonimno-admin-theme');
-                const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-                document.documentElement.dataset.theme = savedTheme === 'dark' || savedTheme === 'light' ? savedTheme : systemTheme;
+                // The dashboard follows the dark visual language of the product
+                // by default.  The existing theme switch still lets an operator
+                // opt into the light palette and remembers that choice.
+                document.documentElement.dataset.theme = savedTheme === 'dark' || savedTheme === 'light' ? savedTheme : 'dark';
             } catch (_) {
-                document.documentElement.dataset.theme = 'light';
+                document.documentElement.dataset.theme = 'dark';
             }
         })();
     </script>
@@ -331,10 +333,10 @@ LOGIN_PAGE = '''
         }
         :root[data-theme="dark"] {
             color-scheme: dark;
-            --ink: #ecf5f3; --muted: #96aaa7; --line: #2b3d3e; --accent: #43b8a9; --accent-dark: #65cbbc;
-            --primary-bg: #247f75; --primary-hover: #1d6c64;
-            --canvas: #0d1516; --surface: rgba(20,32,34,.97); --field: #111d1f; --field-focus: #172628;
-            --label: #b4c5c2; --error: #ef8b91; --login-border: rgba(155,195,188,.14); --login-shadow: rgba(0,0,0,.34);
+            --ink: #f2f7fb; --muted: #8ea2b5; --line: #213347; --accent: #2bd2b2; --accent-dark: #5de5c9;
+            --primary-bg: #20b99e; --primary-hover: #27c9ad;
+            --canvas: #071019; --surface: rgba(16,27,39,.97); --field: #0c1825; --field-focus: #122232;
+            --label: #b7c8d5; --error: #ff727b; --login-border: rgba(93,229,201,.16); --login-shadow: rgba(0,0,0,.42);
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--canvas); color: var(--ink); display: grid; place-items: center; min-height: 100vh; padding: 24px; }
@@ -450,17 +452,17 @@ BASE_HTML = '''
         }
         :root[data-theme="dark"] {
             color-scheme: dark;
-            --canvas: #0d1516; --surface: #142022; --surface-soft: #182628; --ink: #edf6f4; --muted: #94aaa6;
-            --line: #293a3c; --accent: #43b8a9; --accent-dark: #72d1c4; --accent-soft: #173b38;
-            --primary-bg: #247f75; --primary-hover: #1d6c64;
-            --danger: #ef8b91; --warning: #e7ac64; --success: #6dcca3;
-            --sidebar: #101b1d; --topbar: rgba(13,21,22,.88); --topbar-line: rgba(41,58,60,.92);
-            --nav-title: #708582; --nav-text: #a8bbb8; --nav-hover: #192729; --logout: #e58b90;
-            --line-strong: #3c5354; --row-line: #243436; --row-hover: #172426; --field: #111d1f;
-            --table-head: #111d1f; --table-text: #c7d6d3; --label: #b1c3c0; --button-surface: #172426; --button-hover: #1d2e30;
-            --neutral-badge: #1d2c2e; --neutral-badge-text: #aabbb8; --success-soft: #193328; --success-line: #356e52; --danger-soft: #301d20; --danger-line: #704147;
-            --warning-soft: #2d261b; --warning-hover: #382d1d; --warning-line: #685033;
-            --card-shadow: 0 8px 28px rgba(0,0,0,.18); --card-shadow-hover: 0 12px 34px rgba(0,0,0,.25);
+            --canvas: #071019; --surface: #101b27; --surface-soft: #122232; --ink: #f2f7fb; --muted: #8ea2b5;
+            --line: #213347; --accent: #2bd2b2; --accent-dark: #5de5c9; --accent-soft: #123c3d;
+            --primary-bg: #20b99e; --primary-hover: #27c9ad;
+            --danger: #ff727b; --warning: #ff9b3e; --success: #45d7b1;
+            --sidebar: #08131f; --topbar: rgba(7,16,25,.90); --topbar-line: rgba(33,51,71,.9);
+            --nav-title: #71879c; --nav-text: #c0cfdb; --nav-hover: #122536; --logout: #ff727b;
+            --line-strong: #31506a; --row-line: #1d3043; --row-hover: #132638; --field: #0c1825;
+            --table-head: #0c1825; --table-text: #d3dfe8; --label: #b7c8d5; --button-surface: #132333; --button-hover: #192d40;
+            --neutral-badge: #1b2a3a; --neutral-badge-text: #b5c4d0; --success-soft: #103a38; --success-line: #1e7d6e; --danger-soft: #3a2029; --danger-line: #8b3c4c;
+            --warning-soft: #3a2a1b; --warning-hover: #4a321d; --warning-line: #996329;
+            --card-shadow: 0 10px 30px rgba(0,0,0,.24); --card-shadow-hover: 0 16px 38px rgba(0,0,0,.34);
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html { background: var(--canvas); }
@@ -506,6 +508,13 @@ BASE_HTML = '''
         .stat-number { font-size: 29px; line-height: 1.1; font-weight: 770; color: var(--ink); letter-spacing: -.025em; }
         .stat-label { font-size: 12px; color: var(--muted); margin-top: 8px; }
         .stat-card .icon { width: 30px; height: 30px; margin-bottom: 17px; display: grid; place-items: center; border-radius: 9px; background: var(--accent-soft); color: var(--accent-dark); font-size: 14px; }
+        :root[data-theme="dark"] .stat-card:nth-child(1) { --card-accent: #42e0b4; --card-accent-soft: rgba(42, 205, 167, .14); --card-tint: rgba(24, 119, 108, .12); }
+        :root[data-theme="dark"] .stat-card:nth-child(2) { --card-accent: #5da3ff; --card-accent-soft: rgba(72, 142, 255, .14); --card-tint: rgba(31, 78, 147, .12); }
+        :root[data-theme="dark"] .stat-card:nth-child(3) { --card-accent: #c17aff; --card-accent-soft: rgba(169, 91, 255, .15); --card-tint: rgba(91, 47, 140, .12); }
+        :root[data-theme="dark"] .stat-card:nth-child(4) { --card-accent: #ff9b3e; --card-accent-soft: rgba(255, 145, 42, .15); --card-tint: rgba(143, 78, 28, .12); }
+        :root[data-theme="dark"] .stat-card { background: linear-gradient(145deg, var(--surface) 0%, var(--card-tint, transparent) 100%); }
+        :root[data-theme="dark"] .stat-card .icon { background: var(--card-accent-soft, var(--accent-soft)); color: var(--card-accent, var(--accent-dark)); }
+        :root[data-theme="dark"] .stat-card:hover { border-color: color-mix(in srgb, var(--card-accent, var(--accent)) 48%, var(--line)); }
         .quick-grid { display: grid; grid-template-columns: 1.35fr .65fr; gap: 14px; }
         .system-status-grid { display: grid; gap: 9px; margin-top: 18px; }
         .system-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-soft); font-size: 13px; }
