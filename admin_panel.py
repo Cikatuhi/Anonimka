@@ -451,8 +451,27 @@ app.add_middleware(
 )
 
 FAVICON_SVG = '''
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Валентинка">
-  <text x="32" y="49" text-anchor="middle" font-size="48" font-family="Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif">&#x1F48C;</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Anonimno">
+  <rect x="3" y="3" width="58" height="58" rx="17" fill="#1fb89f"/>
+  <rect x="13" y="18" width="38" height="28" rx="9" fill="#071019" stroke="#a4ffe7" stroke-width="2.5"/>
+  <path d="M32 18v-6m0 0-4 4m4-4 4 4" fill="none" stroke="#a4ffe7" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="24" cy="31" r="3" fill="#a4ffe7"/>
+  <circle cx="40" cy="31" r="3" fill="#a4ffe7"/>
+  <path d="M23 39h18" fill="none" stroke="#a4ffe7" stroke-width="2.5" stroke-linecap="round"/>
+</svg>
+'''
+
+# Inline SVG keeps the brand mark crisp on every screen size and avoids an
+# additional static asset request for the admin panel.  The dark robot face
+# also remains legible in both the light and dark themes.
+ROBOT_LOGO_SVG = '''
+<svg class="robot-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Anonimno" focusable="false">
+  <rect x="1" y="1" width="46" height="46" rx="14" fill="#1fb89f"/>
+  <rect x="9" y="14" width="30" height="23" rx="7" fill="#071019" stroke="#a4ffe7" stroke-width="2"/>
+  <path d="M24 14V9m0 0-3 3m3-3 3 3" fill="none" stroke="#a4ffe7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="18" cy="25" r="2.5" fill="#a4ffe7"/>
+  <circle cx="30" cy="25" r="2.5" fill="#a4ffe7"/>
+  <path d="M17 32h14" fill="none" stroke="#a4ffe7" stroke-width="2" stroke-linecap="round"/>
 </svg>
 '''
 
@@ -498,7 +517,8 @@ LOGIN_PAGE = '''
         .login-box {
             position: relative; z-index: 1; background: var(--surface); border-radius: 22px; padding: 38px; max-width: 430px; width: 100%; border: 1px solid var(--login-border); box-shadow: 0 24px 70px var(--login-shadow);
         }
-        .brand-mark { width: 48px; height: 48px; margin: 0 auto 20px; display: grid; place-items: center; border-radius: 14px; color: white; background: var(--primary-bg); font-size: 22px; font-weight: 800; box-shadow: 0 10px 24px rgba(17,139,126,.22); }
+        .brand-mark { width: 58px; height: 58px; margin: 0 auto 20px; display: grid; place-items: center; border-radius: 17px; color: white; background: var(--primary-bg); box-shadow: 0 10px 24px rgba(17,139,126,.22); }
+        .brand-mark .robot-logo { width: 58px; height: 58px; display: block; }
         .login-box h1 { color: var(--ink); font-size: 27px; text-align: center; margin-bottom: 8px; letter-spacing: -.02em; }
         .login-box .subtitle { color: var(--muted); text-align: center; margin-bottom: 30px; font-size: 14px; line-height: 1.5; }
         .login-box label { display: block; color: var(--label); margin-bottom: 7px; font-weight: 650; font-size: 13px; }
@@ -517,7 +537,7 @@ LOGIN_PAGE = '''
 </head>
 <body>
     <div class="login-box">
-        <div class="brand-mark">A</div>
+        <div class="brand-mark">ROBOT_LOGO_PLACEHOLDER</div>
         <h1>Панель управления</h1>
         <p class="subtitle">Войдите, чтобы управлять ботом и отслеживать ключевые показатели.</p>
         <form action="/admin/login" method="post">
@@ -535,7 +555,7 @@ LOGIN_PAGE = '''
 
 MENU = '''
 <div class="sidebar-brand">
-    <div class="brand-symbol">A</div>
+    <div class="brand-symbol">ROBOT_LOGO_PLACEHOLDER</div>
     <div><strong>Anonimno</strong><span>Панель управления</span></div>
 </div>
 <nav class="sidebar-nav" aria-label="Основная навигация">
@@ -569,6 +589,9 @@ MENU = '''
     <a class="nav-link logout-link" href="/admin/logout"><span class="nav-icon">↪</span><span>Выйти</span></a>
 </div>
 '''
+
+LOGIN_PAGE = LOGIN_PAGE.replace('ROBOT_LOGO_PLACEHOLDER', ROBOT_LOGO_SVG)
+MENU = MENU.replace('ROBOT_LOGO_PLACEHOLDER', ROBOT_LOGO_SVG)
 
 BASE_HTML = '''
 <!DOCTYPE html>
@@ -625,6 +648,7 @@ BASE_HTML = '''
         .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 40; width: var(--sidebar-width); display: flex; flex-direction: column; background: var(--sidebar); border-right: 1px solid var(--line); }
         .sidebar-brand { height: 76px; display: flex; align-items: center; gap: 12px; padding: 0 22px; border-bottom: 1px solid var(--line); }
         .brand-symbol { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; color: white; background: var(--primary-bg); font-weight: 800; box-shadow: 0 8px 18px rgba(17,139,126,.18); }
+        .brand-symbol .robot-logo { width: 38px; height: 38px; display: block; }
         .sidebar-brand strong { display: block; font-size: 15px; letter-spacing: -.01em; }
         .sidebar-brand span { display: block; color: var(--muted); font-size: 11px; margin-top: 1px; }
         .sidebar-nav { flex: 1; overflow-y: auto; padding: 18px 14px; }
