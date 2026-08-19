@@ -67,6 +67,49 @@ def format_admin_datetime(value, *, date_only: bool = False, include_seconds: bo
     return parsed.strftime("%d.%m.%Y %H:%M")
 
 
+SUBSCRIPTION_STATUS_META = {
+    "active": {
+        "label": "Активна",
+        "class_name": "subscription-status-active",
+    },
+    "retry_low": {
+        "label": "Повторная оплата",
+        "class_name": "subscription-status-retry",
+    },
+    "pending": {
+        "label": "Ожидает оплаты",
+        "class_name": "subscription-status-pending",
+    },
+    "cancelled": {
+        "label": "Отменена",
+        "class_name": "subscription-status-cancelled",
+    },
+    "expired": {
+        "label": "Истекла",
+        "class_name": "subscription-status-expired",
+    },
+}
+
+
+def subscription_status_meta(status) -> tuple[str, str, str]:
+    """Return a safe display label and CSS class for a subscription status."""
+    raw_status = str(status or "unknown").strip().lower() or "unknown"
+    meta = SUBSCRIPTION_STATUS_META.get(raw_status)
+    if meta:
+        return raw_status, meta["label"], meta["class_name"]
+    return raw_status, raw_status.replace("_", " ").capitalize(), "subscription-status-unknown"
+
+
+def subscription_status_badge(status) -> str:
+    """Render a consistent subscription status badge for the admin UI."""
+    raw_status, label, class_name = subscription_status_meta(status)
+    return (
+        f'<span class="subscription-status {class_name}" '
+        f'title="Технический статус: {escape(raw_status)}">'
+        f'{escape(label)}</span>'
+    )
+
+
 async def ensure_admin_indexes() -> None:
     """Create indexes used by admin list pages when they are missing.
 
@@ -270,7 +313,7 @@ BASE_HTML = '''
             --nav-title: #94a19f; --nav-text: #526765; --nav-hover: #f0f5f3; --logout: #9b4b4f;
             --line-strong: #bdcfcb; --row-line: #edf2f0; --row-hover: #fbfdfc; --field: #fbfdfc;
             --table-head: #f8fbfa; --table-text: #324947; --label: #465e5b; --button-surface: #ffffff; --button-hover: #f7faf9;
-            --neutral-badge: #f1f4f3; --neutral-badge-text: #5d706d; --danger-soft: #fff5f5; --danger-line: #dbaeb1;
+            --neutral-badge: #f1f4f3; --neutral-badge-text: #5d706d; --success-soft: #eef9f2; --success-line: #b9dfc9; --danger-soft: #fff5f5; --danger-line: #dbaeb1;
             --warning-soft: #fffaf3; --warning-hover: #fff5e8; --warning-line: #ead6b9;
             --card-shadow: 0 7px 24px rgba(34,72,68,.035); --card-shadow-hover: 0 10px 28px rgba(34,72,68,.06);
         }
@@ -284,7 +327,7 @@ BASE_HTML = '''
             --nav-title: #708582; --nav-text: #a8bbb8; --nav-hover: #192729; --logout: #e58b90;
             --line-strong: #3c5354; --row-line: #243436; --row-hover: #172426; --field: #111d1f;
             --table-head: #111d1f; --table-text: #c7d6d3; --label: #b1c3c0; --button-surface: #172426; --button-hover: #1d2e30;
-            --neutral-badge: #1d2c2e; --neutral-badge-text: #aabbb8; --danger-soft: #301d20; --danger-line: #704147;
+            --neutral-badge: #1d2c2e; --neutral-badge-text: #aabbb8; --success-soft: #193328; --success-line: #356e52; --danger-soft: #301d20; --danger-line: #704147;
             --warning-soft: #2d261b; --warning-hover: #382d1d; --warning-line: #685033;
             --card-shadow: 0 8px 28px rgba(0,0,0,.18); --card-shadow-hover: 0 12px 34px rgba(0,0,0,.25);
         }
@@ -353,6 +396,13 @@ BASE_HTML = '''
         .badge { display: inline-block; padding: 4px 9px; border-radius: 999px; font-size: 10px; font-weight: 750; border: 1px solid transparent; white-space: nowrap; }
         .badge-text { background: var(--accent-soft); color: var(--accent-dark); border-color: var(--line); }
         .badge-photo, .badge-video, .badge-voice, .badge-sticker, .badge-video_note { background: var(--neutral-badge); color: var(--neutral-badge-text); border-color: var(--line); }
+        .subscription-status { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; padding: 5px 10px; border: 1px solid transparent; border-radius: 999px; font-size: 11px; font-weight: 760; line-height: 1; white-space: nowrap; }
+        .subscription-status::before { content: ""; width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: currentColor; }
+        .subscription-status-active { color: var(--success); background: var(--success-soft); border-color: var(--success-line); }
+        .subscription-status-retry { color: var(--warning); background: var(--warning-soft); border-color: var(--warning-line); }
+        .subscription-status-pending { color: var(--muted); background: var(--neutral-badge); border-color: var(--line); }
+        .subscription-status-cancelled, .subscription-status-expired { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-line); }
+        .subscription-status-unknown { color: var(--muted); background: var(--neutral-badge); border-color: var(--line); }
         .form-container { background: var(--surface); padding: 22px; border-radius: 15px; border: 1px solid var(--line); box-shadow: var(--card-shadow); }
         label { display: block; margin-bottom: 7px; color: var(--label); font-weight: 680; font-size: 13px; }
         textarea, input[type="text"] {
@@ -966,18 +1016,18 @@ async def subscriptions_page(request: Request):
     <div class="stats">
         <div class="stat-card"><div class="stat-number">{total_users}</div><div class="stat-label">Уникальных пользователей</div></div>
         <div class="stat-card"><div class="stat-number">{total_records}</div><div class="stat-label">Всего записей подписок</div></div>
-        <div class="stat-card"><div class="stat-number">{active_users}</div><div class="stat-label">Действующих active</div></div>
+        <div class="stat-card"><div class="stat-number">{active_users}</div><div class="stat-label">Действующих подписок</div></div>
         <div class="stat-card"><div class="stat-number">{retry_low_users}</div><div class="stat-label">Ожидают повторной оплаты</div></div>
     </div>
     '''
 
     if status_counts:
         status_labels = {
-            "active": "active",
-            "retry_low": "retry_low",
-            "pending": "pending",
-            "cancelled": "cancelled",
-            "expired": "expired",
+            "active": "Активна",
+            "retry_low": "Повторная оплата",
+            "pending": "Ожидает оплаты",
+            "cancelled": "Отменена",
+            "expired": "Истекла",
         }
         summary = " · ".join(
             f"{escape(status_labels.get(status, status))}: {data['users']} польз."
@@ -1000,8 +1050,7 @@ async def subscriptions_page(request: Request):
                 </tr>
         '''
         for row in rows:
-            raw_status = str(row.get('status') or 'unknown')
-            status_color = "#7c3aed" if raw_status == 'active' else "#ff4488"
+            raw_status, _, _ = subscription_status_meta(row.get('status'))
             end_date_str = format_admin_datetime(row['end_date'], date_only=True, fallback='∞')
 
             block_btn = ''
@@ -1020,7 +1069,7 @@ async def subscriptions_page(request: Request):
                 <td>{escape(str(row.get('plan') or '-'))}</td>
                 <td>{format_admin_datetime(row['start_date'], date_only=True)}</td>
                 <td>{end_date_str}</td>
-                <td><span style="color:{status_color};">{escape(raw_status)}</span></td>
+                <td>{subscription_status_badge(raw_status)}</td>
                 <td>{block_btn}</td>
             </tr>
             '''
