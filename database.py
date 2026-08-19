@@ -70,11 +70,25 @@ async def get_messages_count():
         await release_conn(conn)
 
 async def get_active_subscriptions_count():
-    """Получить количество активных подписок"""
+    """Получить количество подписок с действующим оплаченным доступом."""
     conn = await get_conn()
     try:
         return await conn.fetchval(
-            "SELECT COUNT(*) FROM subscriptions WHERE status = 'active' AND (end_date IS NULL OR end_date > NOW())"
+            """
+            SELECT COUNT(*)
+            FROM subscriptions
+            WHERE (
+                status = 'active' AND (end_date IS NULL OR end_date > NOW())
+            ) OR (
+                status = 'cancelled' AND end_date IS NOT NULL AND end_date > NOW()
+                AND EXISTS (
+                    SELECT 1
+                    FROM unsubscribed_users AS archived
+                    WHERE archived.telegram_id = subscriptions.user_id
+                      AND archived.reason = 'manual'
+                )
+            )
+            """
         )
     finally:
         await release_conn(conn)
@@ -791,7 +805,23 @@ async def get_all_users_in_retry_low():
 async def count_active_subscriptions():
     conn = await get_conn()
     try:
-        return await conn.fetchval("SELECT COUNT(*) FROM subscriptions WHERE status = 'active' AND (end_date IS NULL OR end_date > NOW())")
+        return await conn.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM subscriptions
+            WHERE (
+                status = 'active' AND (end_date IS NULL OR end_date > NOW())
+            ) OR (
+                status = 'cancelled' AND end_date IS NOT NULL AND end_date > NOW()
+                AND EXISTS (
+                    SELECT 1
+                    FROM unsubscribed_users AS archived
+                    WHERE archived.telegram_id = subscriptions.user_id
+                      AND archived.reason = 'manual'
+                )
+            )
+            """
+        )
     finally:
         await release_conn(conn)
 
@@ -876,6 +906,26 @@ async def unsubscribe_user(
                 user_id,
             )
 
+            existing_archive_reason = await conn.fetchval(
+                "SELECT reason FROM unsubscribed_users WHERE telegram_id = $1 FOR UPDATE",
+                user_id,
+            )
+
+            # A technical archive (administrator block or an unavailable
+            # card) must not be accidentally converted into a user-initiated
+            # cancellation.  Keeping the original reason is important because
+            # it controls whether paid access is still allowed until end_date.
+            if (
+                latest_subscription
+                and latest_subscription["status"] == "cancelled"
+                and existing_archive_reason
+                and (
+                    (reason == "manual" and existing_archive_reason != "manual")
+                    or (reason != "manual" and existing_archive_reason == "manual")
+                )
+            ):
+                return True
+
             # Keep the complete history as JSON and also copy the current
             # subscription's key fields for filtering and restoration.
             snapshot_rows = []
@@ -890,7 +940,11 @@ async def unsubscribe_user(
             subscription_id = latest_subscription['subscription_id'] if latest_subscription else None
 
             await conn.execute(
-                "UPDATE subscriptions SET status = 'cancelled' WHERE user_id = $1",
+                """
+                UPDATE subscriptions
+                SET status = 'cancelled', next_retry_at = NULL
+                WHERE user_id = $1
+                """,
                 user_id,
             )
 
@@ -1122,6 +1176,17 @@ async def is_user_unsubscribed(user_id: int) -> bool:
     try:
         row = await conn.fetchrow("SELECT telegram_id FROM unsubscribed_users WHERE telegram_id = $1", user_id)
         return row is not None
+    finally:
+        await release_conn(conn)
+
+async def get_unsubscribe_reason(user_id: int):
+    """Return the archive reason for a cancelled subscription, if present."""
+    conn = await get_conn()
+    try:
+        return await conn.fetchval(
+            "SELECT reason FROM unsubscribed_users WHERE telegram_id = $1",
+            user_id,
+        )
     finally:
         await release_conn(conn)
 

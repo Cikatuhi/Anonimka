@@ -319,13 +319,28 @@ async def cancel_subscription(user_id: str):
     subscription_id = subscription.get("subscription_id")
     if subscription_id:
         result = await subscription_manager.client.cancel_subscription(subscription_id)
-        if result["success"]:
-            await database.update_subscription_status(int(user_id), "cancelled")
-            return {"success": True, "message": "Subscription cancelled"}
-        else:
-            return {"success": False, "error": result.get("error")}
+        if not result["success"]:
+            # The current service uses token charges rather than CloudPayments
+            # recurring subscriptions.  A legacy provider-side cancellation
+            # may therefore be unavailable; local cancellation still has to
+            # succeed and must preserve the already-paid end_date.
+            logger.warning(
+                "CloudPayments cancellation was not available for %s: %s",
+                user_id,
+                result.get("error"),
+            )
 
-    return {"success": False, "message": "No subscription to cancel"}
+    success = await database.unsubscribe_user(int(user_id), reason="manual")
+    if not success:
+        return {"success": False, "error": "Failed to cancel subscription"}
+
+    return {
+        "success": True,
+        "message": "Auto-renewal cancelled; paid access remains until end_date",
+        "end_date": subscription.get("end_date").isoformat()
+        if subscription.get("end_date")
+        else None,
+    }
 
 
 @router.post("/subscription/check-expired")

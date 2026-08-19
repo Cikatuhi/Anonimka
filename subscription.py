@@ -385,9 +385,15 @@ class SubscriptionManager:
 
                 subscription = await conn.fetchrow(
                     """
-                    SELECT * FROM subscriptions
-                    WHERE user_id = $1
-                    ORDER BY created_at DESC
+                    SELECT s.*,
+                           (
+                               SELECT archived.reason
+                               FROM unsubscribed_users AS archived
+                               WHERE archived.telegram_id = s.user_id
+                           ) AS archive_reason
+                    FROM subscriptions AS s
+                    WHERE s.user_id = $1
+                    ORDER BY s.created_at DESC
                     LIMIT 1
                     FOR UPDATE
                     """,
@@ -395,6 +401,11 @@ class SubscriptionManager:
                 )
                 if not subscription:
                     return {"success": False, "error": "Subscription not found"}
+
+                manual_cancelled = (
+                    subscription["status"] == "cancelled"
+                    and subscription["archive_reason"] == "manual"
+                )
 
                 if card_token:
                     await conn.execute(
@@ -419,14 +430,20 @@ class SubscriptionManager:
                 # HIGH -> MEDIUM -> LOW fallback attempts.
                 if status != "Completed" and reason_code is not None:
                     reason = f"card_unavailable_{reason_code}"
-                    archived = await database.unsubscribe_user(
-                        int(user_id),
-                        reason=reason,
-                        conn=conn,
-                    )
-                    if not archived:
-                        raise RuntimeError(
-                            f"Failed to archive subscription for reason code {reason_code}"
+                    if not manual_cancelled:
+                        archived = await database.unsubscribe_user(
+                            int(user_id),
+                            reason=reason,
+                            conn=conn,
+                        )
+                        if not archived:
+                            raise RuntimeError(
+                                f"Failed to archive subscription for reason code {reason_code}"
+                            )
+                    else:
+                        await conn.execute(
+                            "UPDATE subscriptions SET status = 'cancelled', next_retry_at = NULL WHERE user_id = $1",
+                            int(user_id),
                         )
                     logger.warning(
                         "User %s: recurrent transaction %s reported card unavailable "
@@ -456,16 +473,22 @@ class SubscriptionManager:
                     days = self.plan_days[paid_plan]
                     next_plan = self.next_plan_after_success[paid_plan]
                     end_date = now_msk() + timedelta(days=days)
+                    # A charge can finish after the user has cancelled while
+                    # that charge was already in flight.  Keep the paid time,
+                    # but preserve ``cancelled`` so the scheduler cannot
+                    # start another charge.
+                    resulting_status = "cancelled" if manual_cancelled else "active"
 
                     await conn.execute(
                         """
                         UPDATE subscriptions
-                        SET status = 'active',
-                            end_date = $1,
-                            plan = $2,
+                        SET status = $1,
+                            end_date = $2,
+                            plan = $3,
                             next_retry_at = NULL
-                        WHERE user_id = $3
+                        WHERE user_id = $4
                         """,
+                        resulting_status,
                         to_db_timestamp(end_date),
                         next_plan,
                         int(user_id),
@@ -496,6 +519,18 @@ class SubscriptionManager:
                 failed_plan = plan_by_amount.get(amount)
                 if not failed_plan:
                     return {"success": False, "error": f"Unknown amount: {amount}"}
+
+                if manual_cancelled:
+                    await conn.execute(
+                        "UPDATE subscriptions SET status = 'cancelled', next_retry_at = NULL WHERE user_id = $1",
+                        int(user_id),
+                    )
+                    return {
+                        "success": False,
+                        "status": "cancelled",
+                        "transaction_id": transaction_key,
+                        "message": "Auto-renewal was cancelled; no fallback charge scheduled",
+                    }
 
                 next_plan = self.fallback_plan[failed_plan]
                 if next_plan:

@@ -708,20 +708,38 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = await database.get_conn()
     try:
         row = await conn.fetchrow(
-            "SELECT status, end_date FROM subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+            """
+            SELECT s.status, s.end_date, u.reason AS cancellation_reason
+            FROM subscriptions AS s
+            LEFT JOIN unsubscribed_users AS u ON u.telegram_id = s.user_id
+            WHERE s.user_id = $1
+            ORDER BY s.created_at DESC
+            LIMIT 1
+            """,
             user_id
         )
         print(f"🔍 SQL row: {row}")
     finally:
         await database.release_conn(conn)
     
+    # Cancellation stops future charges, but must not revoke time that the
+    # user has already paid for.  A cancelled subscription is therefore still
+    # eligible for premium access until its stored end_date; unlike ``active``
+    # it may not use a NULL end_date as an unlimited-access fallback.
     is_active = False
     if row:
         status = row['status']
         end_date = row['end_date']
-        if status == 'active' and (
-            end_date is None or as_utc(end_date) > as_utc(now_msk())
-        ):
+        has_future_access = (
+            status == 'active'
+            and (end_date is None or as_utc(end_date) > as_utc(now_msk()))
+        ) or (
+            status == 'cancelled'
+            and row['cancellation_reason'] == 'manual'
+            and end_date is not None
+            and as_utc(end_date) > as_utc(now_msk())
+        )
+        if has_future_access:
             is_active = True
             print(f"✅ Подписка АКТИВНА для {user_id}!")
         else:
@@ -927,6 +945,7 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     try:
         already_unsubscribed = await database.is_user_unsubscribed(user_id)
+        unsubscribe_reason = await database.get_unsubscribe_reason(user_id)
     except Exception:
         logging.exception("/unsub: failed to check unsubscribe state for user %s", user_id)
         await update.message.reply_text(
@@ -934,10 +953,31 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
+    if subscription.get('status') == 'cancelled':
+        if unsubscribe_reason == 'manual':
+            message = (
+                "ℹ️ Автопродление уже отключено.\n\n"
+                "Оплаченный премиум-доступ сохранится до окончания текущего периода, "
+                "новых списаний не будет.\n\n"
+                "Если хотите оформить подписку снова — нажмите «👀 Узнать отправителя» "
+                "в любом анонимном сообщении."
+            )
+        else:
+            message = (
+                "ℹ️ Эта подписка уже отключена.\n\n"
+                "Для оформления новой подписки нажмите «👀 Узнать отправителя» "
+                "в любом анонимном сообщении."
+            )
+        await update.message.reply_text(
+            message
+        )
+        return
+
     if already_unsubscribed:
         await update.message.reply_text(
-            "ℹ️ Вы уже отписались от подписки.\n\n"
-            "Если хотите оформить подписку снова — нажмите «👀 Узнать отправителя» в любом анонимном сообщении."
+            "ℹ️ Эта подписка уже отключена.\n\n"
+            "Для оформления новой подписки нажмите «👀 Узнать отправителя» "
+            "в любом анонимном сообщении."
         )
         return
     
@@ -951,7 +991,8 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     await update.message.reply_text(
         f"⚠️ <b>Вы уверены, что хотите отписаться от подписки?</b>\n\n"
-        f"После отписки вы больше не сможете узнавать авторов анонимных сообщений.\n\n"
+        f"Автопродление отключится, но уже оплаченный премиум-доступ сохранится "
+        f"до окончания текущего периода. Новых списаний не будет.\n\n"
         f"Вы всегда можете оформить подписку заново, нажав на кнопку «👀 Узнать отправителя» в любом анонимном сообщении.",
         reply_markup=reply_markup,
         parse_mode="HTML"
@@ -974,14 +1015,23 @@ async def confirm_unsubscribe_handler(update: Update, context: ContextTypes.DEFA
             parse_mode="HTML"
         )
         return
+
+    if subscription.get('status') == 'cancelled':
+        await query.edit_message_text(
+            "ℹ️ Автопродление уже отключено.\n\n"
+            "Оплаченный премиум-доступ сохранится до окончания текущего периода, "
+            "новых списаний не будет.",
+            parse_mode="HTML",
+        )
+        return
     
     success = await database.unsubscribe_user(user_id, username, first_name, 'manual')
     
     if success:
         await query.edit_message_text(
-            "✅ <b>Вы успешно отписались от подписки!</b>\n\n"
-            "Премиум-доступ отключён.\n"
-            "Вы больше не будете получать уведомления о списаниях.\n\n"
+            "✅ <b>Автопродление отключено!</b>\n\n"
+            "Уже оплаченный премиум-доступ сохранится до окончания текущего периода.\n"
+            "Новых списаний и уведомлений о них не будет.\n\n"
             "Чтобы оформить подписку снова — нажмите «👀 Узнать отправителя» в любом анонимном сообщении.",
             parse_mode="HTML"
         )

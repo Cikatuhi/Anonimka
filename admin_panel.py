@@ -248,8 +248,17 @@ subscriptions_hourly AS (
     FROM subscriptions
     WHERE created_at >= $1
       AND created_at <= $2
-      AND status = 'active'
-      AND (end_date IS NULL OR end_date > NOW())
+      AND (
+          (status = 'active' AND (end_date IS NULL OR end_date > NOW()))
+          OR (
+              status = 'cancelled' AND end_date IS NOT NULL AND end_date > NOW()
+              AND EXISTS (
+                  SELECT 1 FROM unsubscribed_users AS archived
+                  WHERE archived.telegram_id = subscriptions.user_id
+                    AND archived.reason = 'manual'
+              )
+          )
+      )
     GROUP BY 1
 ),
 payment_visitors_hourly AS (
@@ -275,8 +284,16 @@ SELECT
     (
         SELECT COUNT(*)
         FROM subscriptions
-        WHERE status = 'active'
-          AND (end_date IS NULL OR end_date > NOW())
+        WHERE (
+            status = 'active' AND (end_date IS NULL OR end_date > NOW())
+        ) OR (
+            status = 'cancelled' AND end_date IS NOT NULL AND end_date > NOW()
+            AND EXISTS (
+                SELECT 1 FROM unsubscribed_users AS archived
+                WHERE archived.telegram_id = subscriptions.user_id
+                  AND archived.reason = 'manual'
+            )
+        )
     ) AS total_subscriptions,
     (SELECT COUNT(*) FROM payment_link_visits) AS payment_visitors,
     (
@@ -299,8 +316,17 @@ SELECT
         FROM subscriptions
         WHERE created_at >= $1
           AND created_at <= $2
-          AND status = 'active'
-          AND (end_date IS NULL OR end_date > NOW())
+          AND (
+              (status = 'active' AND (end_date IS NULL OR end_date > NOW()))
+              OR (
+                  status = 'cancelled' AND end_date IS NOT NULL AND end_date > NOW()
+                  AND EXISTS (
+                      SELECT 1 FROM unsubscribed_users AS archived
+                      WHERE archived.telegram_id = subscriptions.user_id
+                        AND archived.reason = 'manual'
+                  )
+              )
+          )
     ) AS subscriptions_today,
     (SELECT COUNT(*) FROM payment_link_visits WHERE first_visited_at >= $1 AND first_visited_at <= $2) AS payment_visitors_today,
     COALESCE((SELECT array_agg(COALESCE(u.value, 0)::bigint ORDER BY h.hour)
@@ -1432,12 +1458,28 @@ async def subscriptions_page(request: Request):
                        COUNT(*) AS records,
                        COUNT(DISTINCT user_id) AS users,
                        COUNT(*) FILTER (
-                           WHERE status = 'active'
-                             AND (end_date IS NULL OR end_date > NOW())
+                           WHERE (
+                               status = 'active' AND (end_date IS NULL OR end_date > NOW())
+                           ) OR (
+                               status = 'cancelled' AND end_date IS NOT NULL AND end_date > NOW()
+                               AND EXISTS (
+                                   SELECT 1 FROM unsubscribed_users AS archived
+                                   WHERE archived.telegram_id = subscriptions.user_id
+                                     AND archived.reason = 'manual'
+                               )
+                           )
                        ) AS current_records,
                        COUNT(DISTINCT user_id) FILTER (
-                           WHERE status = 'active'
-                             AND (end_date IS NULL OR end_date > NOW())
+                           WHERE (
+                               status = 'active' AND (end_date IS NULL OR end_date > NOW())
+                           ) OR (
+                               status = 'cancelled' AND end_date IS NOT NULL AND end_date > NOW()
+                               AND EXISTS (
+                                   SELECT 1 FROM unsubscribed_users AS archived
+                                   WHERE archived.telegram_id = subscriptions.user_id
+                                     AND archived.reason = 'manual'
+                               )
+                           )
                        ) AS current_users
                 FROM subscriptions
                 GROUP BY status
@@ -1453,6 +1495,23 @@ async def subscriptions_page(request: Request):
                 }
                 for row in status_rows
             }
+            active_users = int(await conn.fetchval(
+                """
+                SELECT COUNT(DISTINCT user_id)
+                FROM subscriptions
+                WHERE (
+                    status = 'active' AND (end_date IS NULL OR end_date > NOW())
+                ) OR (
+                    status = 'cancelled' AND end_date IS NOT NULL AND end_date > NOW()
+                    AND EXISTS (
+                        SELECT 1
+                        FROM unsubscribed_users AS archived
+                        WHERE archived.telegram_id = subscriptions.user_id
+                          AND archived.reason = 'manual'
+                    )
+                )
+                """
+            ) or 0)
         finally:
             await database.release_conn(conn)
 
@@ -1467,7 +1526,7 @@ async def subscriptions_page(request: Request):
 
         total_pages = 1
 
-    active_users = status_counts.get("active", {}).get("current_users", 0)
+    active_users = locals().get("active_users", 0)
     retry_low_users = status_counts.get("retry_low", {}).get("users", 0)
 
     html = f'<div class="page-title">📋 Подписки</div>'
