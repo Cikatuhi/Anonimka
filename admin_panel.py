@@ -1,4 +1,5 @@
 import asyncio
+import asyncpg
 import json
 import uuid
 import psutil
@@ -7,9 +8,9 @@ import aiohttp
 from html import escape
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from cloudpayments import CloudPaymentsClient
@@ -26,6 +27,104 @@ ADMINS = {
 
 
 ADMIN_TIMEZONE = ZoneInfo("Europe/Samara")
+
+ADMIN_DASHBOARD_CHANNEL = "admin_dashboard_changed"
+_dashboard_subscribers: set[asyncio.Queue] = set()
+_dashboard_listener_task: asyncio.Task | None = None
+_dashboard_listener_stop: asyncio.Event | None = None
+
+
+def _publish_dashboard_event(payload: str = "changed") -> None:
+    """Wake every connected dashboard without doing database work here."""
+    for queue in tuple(_dashboard_subscribers):
+        # One pending notification is enough: the browser always fetches a
+        # complete fresh snapshot, so a slow client never builds a backlog.
+        if not queue.full():
+            queue.put_nowait(payload)
+
+
+async def _dashboard_listener() -> None:
+    """Keep one dedicated PostgreSQL LISTEN connection for the admin panel."""
+    assert _dashboard_listener_stop is not None
+    retry_delay = 1.0
+
+    while not _dashboard_listener_stop.is_set():
+        conn = None
+        callback = None
+        termination_listener = None
+        stop_wait = None
+        connection_lost_wait = None
+        try:
+            conn = await asyncio.wait_for(
+                asyncpg.connect(
+                    database.DATABASE_URL,
+                    ssl=database.DB_SSL,
+                    command_timeout=30,
+                ),
+                timeout=10,
+            )
+
+            def on_notification(_connection, _pid, _channel, payload):
+                _publish_dashboard_event(payload or "changed")
+
+            callback = on_notification
+            await conn.add_listener(ADMIN_DASHBOARD_CHANNEL, callback)
+            connection_lost = asyncio.Event()
+
+            def on_termination(_connection):
+                connection_lost.set()
+
+            termination_listener = on_termination
+            conn.add_termination_listener(termination_listener)
+            retry_delay = 1.0
+            print("✅ LISTEN admin_dashboard_changed подключён", flush=True)
+            # A reconnect may have missed a notification.  Invalidate all
+            # connected browsers once so they recover from the latest snapshot.
+            _publish_dashboard_event("listener_reconnected")
+            stop_wait = asyncio.create_task(_dashboard_listener_stop.wait())
+            connection_lost_wait = asyncio.create_task(connection_lost.wait())
+            done, _ = await asyncio.wait(
+                (stop_wait, connection_lost_wait),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if connection_lost_wait in done and not _dashboard_listener_stop.is_set():
+                print("⚠️ LISTEN-соединение PostgreSQL закрыто, переподключение", flush=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"⚠️ LISTEN admin_dashboard_changed: {exc}", flush=True)
+        finally:
+            for pending_task in (stop_wait, connection_lost_wait):
+                if pending_task is not None and not pending_task.done():
+                    pending_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await pending_task
+            if conn is not None:
+                with suppress(Exception):
+                    if callback is not None:
+                        await conn.remove_listener(ADMIN_DASHBOARD_CHANNEL, callback)
+                    if termination_listener is not None:
+                        conn.remove_termination_listener(termination_listener)
+                with suppress(Exception):
+                    await conn.close()
+
+        if not _dashboard_listener_stop.is_set():
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(_dashboard_listener_stop.wait(), timeout=retry_delay)
+            retry_delay = min(retry_delay * 2, 30.0)
+
+
+async def _stop_dashboard_listener() -> None:
+    global _dashboard_listener_task, _dashboard_listener_stop
+    if _dashboard_listener_stop is not None:
+        _dashboard_listener_stop.set()
+    if _dashboard_listener_task is not None:
+        _dashboard_listener_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await _dashboard_listener_task
+    _dashboard_listener_task = None
+    _dashboard_listener_stop = None
+    _dashboard_subscribers.clear()
 
 
 def format_admin_datetime(value, *, date_only: bool = False, include_seconds: bool = False, fallback: str = "-") -> str:
@@ -166,6 +265,7 @@ async def ensure_admin_indexes() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _dashboard_listener_task, _dashboard_listener_stop
     print("🚀 Инициализация БД...", flush=True)
     await database.init_pool()
     await database.ensure_broadcast_schema()
@@ -173,13 +273,17 @@ async def lifespan(app: FastAPI):
     conn = await database.get_conn()
     try:
         await database.ensure_webhook_events_schema(conn)
+        await database.ensure_admin_dashboard_notifications(conn)
     finally:
         await database.release_conn(conn)
     await ensure_admin_indexes()
     print("✅ БД готова", flush=True)
+    _dashboard_listener_stop = asyncio.Event()
+    _dashboard_listener_task = asyncio.create_task(_dashboard_listener())
     try:
         yield
     finally:
+        await _stop_dashboard_listener()
         await database.close_pool()
         print("🛑 Соединения с БД закрыты", flush=True)
 app = FastAPI(title="Admin Panel для Telegram Бота", lifespan=lifespan)
@@ -753,7 +857,7 @@ async def monitoring_data():
 
 @app.get("/dashboard/data")
 async def dashboard_data():
-    """Return fresh dashboard counters for background updates."""
+    """Return one fresh dashboard snapshot after an SSE invalidation."""
     try:
         conn = await database.get_conn()
         try:
@@ -811,6 +915,45 @@ async def dashboard_data():
             content={"ok": False, "error": "Не удалось получить показатели дашборда"},
             headers={"Cache-Control": "no-store, max-age=0"},
         )
+
+
+@app.get("/dashboard/events")
+async def dashboard_events(request: Request):
+    """Stream dashboard invalidations to the browser using Server-Sent Events."""
+    queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+    _dashboard_subscribers.add(queue)
+
+    async def event_stream():
+        try:
+            # Fetch a fresh snapshot immediately after connecting.  This also
+            # covers events that happened while a browser was reconnecting.
+            yield 'event: dashboard\ndata: {"reason":"connected"}\n\n'
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=20)
+                    safe_payload = json.dumps(
+                        {"reason": payload or "changed"},
+                        ensure_ascii=False,
+                    )
+                    yield f"event: dashboard\ndata: {safe_payload}\n\n"
+                except asyncio.TimeoutError:
+                    # Keep reverse proxies from closing an otherwise idle SSE
+                    # connection.  A comment is ignored by EventSource.
+                    yield ": heartbeat\n\n"
+        finally:
+            _dashboard_subscribers.discard(queue)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -944,8 +1087,13 @@ async def dashboard(request: Request):
                 // Keep the last known counters visible during a temporary DB/network error.
             }}
         }}
-        refreshDashboardStats();
-        window.setInterval(refreshDashboardStats, 10000);
+        const dashboardEvents = new EventSource('/dashboard/events');
+        dashboardEvents.addEventListener('dashboard', refreshDashboardStats);
+        // EventSource automatically reconnects after a network or proxy
+        // interruption; the server sends a fresh invalidation on reconnect.
+        dashboardEvents.onerror = () => {{
+            // Keep the current values visible while the stream reconnects.
+        }};
         window.setInterval(refreshSystemHealth, 60000);
     </script>
     '''

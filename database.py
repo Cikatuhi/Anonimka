@@ -198,6 +198,62 @@ async def _ensure_payment_link_visits_schema(conn):
     """)
 
 
+async def ensure_admin_dashboard_notifications(conn):
+    """Install PostgreSQL events used for live admin dashboard updates.
+
+    PostgreSQL delivers ``NOTIFY`` only after the transaction that changed a
+    row commits.  The event is therefore a lightweight invalidation signal:
+    the admin panel can fetch one consistent snapshot instead of polling every
+    few seconds.  The migration is idempotent and skips optional tables that
+    have not been created on an older installation yet.
+    """
+    await conn.execute("""
+        CREATE OR REPLACE FUNCTION notify_admin_dashboard_change()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            PERFORM pg_notify(
+                'admin_dashboard_changed',
+                json_build_object('table', TG_TABLE_NAME, 'operation', TG_OP)::text
+            );
+            -- The trigger is statement-level, so there is no row to return.
+            RETURN NULL;
+        END;
+        $$
+    """)
+
+    # These are the only tables that affect the dashboard cards.  Do not
+    # include service_heartbeats: the worker updates it every few seconds and
+    # it would create an unnecessary event stream.
+    trigger_operations = {
+        # These counters depend on row membership, not profile-field edits.
+        "users": "INSERT OR DELETE",
+        "blocked_users": "INSERT OR DELETE",
+        "unsubscribed_users": "INSERT OR DELETE",
+        "messages": "INSERT OR DELETE",
+        "payment_link_visits": "INSERT OR DELETE",
+        # The active-subscription count changes when status or end_date does.
+        "subscriptions": "INSERT OR UPDATE OF status, end_date OR DELETE",
+    }
+    for table_name, operations in trigger_operations.items():
+        exists = await conn.fetchval(
+            "SELECT to_regclass($1) IS NOT NULL",
+            f"public.{table_name}",
+        )
+        if not exists:
+            continue
+        trigger_name = f"notify_admin_dashboard_{table_name}"
+        await conn.execute(
+            f'DROP TRIGGER IF EXISTS "{trigger_name}" ON public."{table_name}"'
+        )
+        await conn.execute(
+            f'''CREATE TRIGGER "{trigger_name}"
+                AFTER {operations} ON public."{table_name}"
+                FOR EACH STATEMENT EXECUTE FUNCTION notify_admin_dashboard_change()'''
+        )
+
+
 async def _ensure_unsubscribed_schema(conn):
     """Create and migrate the unsubscribe archive schema."""
     await conn.execute("""
@@ -536,7 +592,8 @@ async def init_db():
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_unsubscribed_users_id ON unsubscribed_users(telegram_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_tokens_token ON payment_tokens(token)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_tokens_user_id ON payment_tokens(user_id)")
-        
+        await ensure_admin_dashboard_notifications(conn)
+
         print("✅ База данных инициализирована")
     finally:
         await release_conn(conn)
