@@ -13,6 +13,8 @@ sys.path.append('/root/Anonimno-Artem-')
 import database
 
 SITE_URL = os.getenv("SITE_URL", "https://secretky.ru").rstrip("/")
+DOC1_URL = f"{SITE_URL}/doc1"
+DOC3_URL = f"{SITE_URL}/doc3"
 CLOUDPAYMENTS_PUBLIC_ID = os.getenv(
     "CLOUDPAYMENTS_PUBLIC_ID",
     "pk_cfc9c99ee447f06de34f6cd148a22",
@@ -887,13 +889,13 @@ async def payment_page(user_id: int, request: Request):
                     <div class="checkbox-item">
                         <input type="checkbox" id="policy_check" onchange="checkCheckboxes()">
                         <label for="policy_check">
-                            Я согласен на обработку персональных данных и принимаю <a href="/doc1" target="_blank">условия использования</a>
+                            Я согласен на обработку персональных данных и принимаю <a href="{DOC1_URL}" target="_blank">условия использования</a>
                         </label>
                     </div>
                     <div class="checkbox-item">
                         <input type="checkbox" id="terms_check" onchange="checkCheckboxes()">
                         <label for="terms_check">
-                            Я принимаю условия подписки: 5 ₽ за 1 день, далее 699 ₽ за 7 дней. Возможны списания 299 ₽ за 3 дня или 99 ₽ за 1 день; отмена доступна в любой момент
+                            Я согласен с <a href="{DOC3_URL}" target="_blank">правилами рекуррентных платежей</a> и условиями по <a href="{DOC3_URL}" target="_blank">тарифам</a>: 5 ₽ за 1 день, далее 699 ₽ за 7 дней. Возможны списания 299 ₽ за 3 дня или 99 ₽ за 1 день; отмена доступна в любой момент
                         </label>
                     </div>
                 </div>
