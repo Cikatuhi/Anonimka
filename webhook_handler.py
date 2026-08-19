@@ -74,6 +74,37 @@ def _normalise_cloudpayments_payload(body: dict) -> tuple[str | None, dict]:
     return str(event_type).strip().lower() if event_type else None, model
 
 
+async def _journal_webhook_event(
+    body: dict,
+    *,
+    event_type: str | None,
+    transaction_id,
+    account_id,
+    status,
+    is_recurrent: bool,
+) -> None:
+    """Persist a received payload without affecting webhook acknowledgement."""
+    conn = None
+    try:
+        conn = await database.get_conn()
+        await database.record_webhook_event(
+            conn,
+            payload=body,
+            event_type=event_type,
+            transaction_id=transaction_id,
+            account_id=account_id,
+            status=status,
+            is_recurrent=is_recurrent,
+        )
+    except Exception:
+        # A database journal outage must not make CloudPayments retry a
+        # payment that was otherwise processed successfully.
+        logger.exception("Failed to persist CloudPayments webhook in webhook_events")
+    finally:
+        if conn is not None:
+            await database.release_conn(conn)
+
+
 @router.post("/webhook")
 async def handle_webhook(request: Request):
     try:
@@ -113,6 +144,14 @@ async def handle_webhook(request: Request):
             # CloudPayments expects the acknowledgement body to be exactly
             # the documented JSON response.  Keep internal details in logs,
             # not in the callback response.
+            await _journal_webhook_event(
+                body,
+                event_type=event_type,
+                transaction_id=transaction_id,
+                account_id=account_id,
+                status=status,
+                is_recurrent=is_recurrent,
+            )
             return JSONResponse({"code": 0})
 
         card_token = model.get("Token")
@@ -136,6 +175,15 @@ async def handle_webhook(request: Request):
                 )
             except (TypeError, ValueError):
                 is_recurrent = False
+
+        await _journal_webhook_event(
+            body,
+            event_type=event_type,
+            transaction_id=transaction_id,
+            account_id=account_id,
+            status=status,
+            is_recurrent=is_recurrent,
+        )
 
         # Recurrent payments must be processed by SubscriptionManager first.
         # Do not let the generic successful-payment handler below overwrite

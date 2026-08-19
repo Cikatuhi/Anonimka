@@ -1,5 +1,5 @@
 import asyncio
-import os
+import json
 import uuid
 import psutil
 import re
@@ -91,6 +91,28 @@ SUBSCRIPTION_STATUS_META = {
 }
 
 
+WEBHOOK_SENSITIVE_KEYS = {
+    "token",
+    "cardtoken",
+    "cardnumber",
+    "cardcryptogrampacket",
+    "password",
+}
+
+
+def redact_webhook_payload(value):
+    """Hide payment credentials before rendering a webhook in the panel."""
+    if isinstance(value, dict):
+        return {
+            key: "••••••••" if str(key).replace("_", "").lower() in WEBHOOK_SENSITIVE_KEYS
+            else redact_webhook_payload(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_webhook_payload(item) for item in value]
+    return value
+
+
 def subscription_status_meta(status) -> tuple[str, str, str]:
     """Return a safe display label and CSS class for a subscription status."""
     raw_status = str(status or "unknown").strip().lower() or "unknown"
@@ -148,6 +170,11 @@ async def lifespan(app: FastAPI):
     await database.init_pool()
     await database.ensure_broadcast_schema()
     await database.ensure_payment_link_visits_schema()
+    conn = await database.get_conn()
+    try:
+        await database.ensure_webhook_events_schema(conn)
+    finally:
+        await database.release_conn(conn)
     await ensure_admin_indexes()
     print("✅ БД готова", flush=True)
     try:
@@ -1333,20 +1360,37 @@ async def unsubscribed_page(request: Request):
 
 @app.get("/webhooks", response_class=HTMLResponse)
 async def webhooks_page(request: Request):
-    log_file = "/root/main-site/webhook.log"
-    content = ""
+    rows = []
     total = 0
-    
+    page_size = 25
+    total_pages = 1
     try:
-        if os.path.exists(log_file):
-            with open(log_file, "r") as f:
-                content = f.read()
-                total = len(content.split("===")) if "===" in content else 1
-        else:
-            content = "📭 Файл с вебхуками не найден. Ожидайте первые оплаты."
+        page = max(1, int(request.query_params.get("page", "1")))
+    except (TypeError, ValueError):
+        page = 1
+
+    try:
+        conn = await database.get_conn()
+        try:
+            total = int(await conn.fetchval("SELECT COUNT(*) FROM webhook_events") or 0)
+            total_pages = max(1, (total + page_size - 1) // page_size)
+            page = min(page, total_pages)
+            rows = await conn.fetch(
+                """
+                SELECT id, received_at, event_type, transaction_id,
+                       account_id, status, is_recurrent, payload
+                FROM webhook_events
+                ORDER BY received_at DESC, id DESC
+                LIMIT $1 OFFSET $2
+                """,
+                page_size,
+                (page - 1) * page_size,
+            )
+        finally:
+            await database.release_conn(conn)
     except Exception as e:
-        content = f"❌ Ошибка чтения файла: {e}"
-    
+        print(f"❌ Ошибка загрузки вебхуков: {e}", flush=True)
+
     html = f'''
     <div class="page-title">📨 Вебхуки от CloudPayments</div>
     <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
@@ -1356,13 +1400,54 @@ async def webhooks_page(request: Request):
         </div>
     </div>
     <div style="margin-bottom: 15px;">
-        <a href="/webhooks" class="glow-button" style="flex:0 1 auto; width:auto; padding: 8px 16px;">🔄 Обновить</a>
-    </div>
-    <div style="background: #0a0a1a; padding: 20px; border-radius: 12px; border: 1px solid #7c3aed33; font-family: monospace; font-size: 14px; white-space: pre-wrap; word-break: break-all; max-height: 600px; overflow: auto; color: #cdd6f4;">
-        {content}
+        <a href="/webhooks?page={page}" class="glow-button" style="flex:0 1 auto; width:auto; padding: 8px 16px;">🔄 Обновить</a>
     </div>
     '''
-    
+
+    if rows:
+        html += '<div class="table-container"><table><tr><th>Время</th><th>Событие</th><th>Транзакция</th><th>Аккаунт</th><th>Статус</th><th>Тип</th><th>Payload</th></tr>'
+        for row in rows:
+            event_type = escape(str(row.get("event_type") or "pay"))
+            transaction_id = escape(str(row.get("transaction_id") or "—"))
+            account_id = escape(str(row.get("account_id") or "—"))
+            status = str(row.get("status") or "—")
+            status_class = {
+                "completed": "status-ok",
+                "declined": "status-down",
+                "failed": "status-down",
+            }.get(status.lower(), "status-degraded")
+            recurrent = "Рекуррентный" if row.get("is_recurrent") else "Первичный"
+            payload = row.get("payload")
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except (TypeError, ValueError):
+                    pass
+            payload_text = json.dumps(
+                redact_webhook_payload(payload),
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            )
+            html += f'''
+            <tr>
+                <td>{format_admin_datetime(row.get("received_at"), include_seconds=True)}</td>
+                <td>{event_type}</td>
+                <td>{transaction_id}</td>
+                <td>{account_id}</td>
+                <td><span class="status-pill {status_class}">{escape(status)}</span></td>
+                <td>{recurrent}</td>
+                <td><details><summary>Показать</summary><pre style="white-space:pre-wrap;word-break:break-word;max-width:520px;">{escape(payload_text)}</pre></details></td>
+            </tr>
+            '''
+        html += '</table></div>'
+        if total_pages > 1:
+            previous = f'<a class="button button-secondary" href="/webhooks?page={page - 1}">← Предыдущая</a>' if page > 1 else ''
+            next_page = f'<a class="button button-secondary" href="/webhooks?page={page + 1}">Следующая →</a>' if page < total_pages else ''
+            html += f'<div class="page-actions" style="justify-content:space-between;margin-top:16px;"><span class="panel-copy">Страница {page} из {total_pages}</span><div style="display:flex;gap:8px;">{previous}{next_page}</div></div>'
+    else:
+        html += '<div class="empty">📭 Вебхуков пока нет. После следующего запроса CloudPayments запись появится здесь.</div>'
+
     menu = MENU.replace('📨 Вебхуки', '<span style="color:#ffaa44; text-shadow: 0 0 30px #ffaa4444;">📨 Вебхуки</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
 

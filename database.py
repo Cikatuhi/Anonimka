@@ -272,6 +272,62 @@ async def ensure_message_retention_schema(conn):
         )
 
 
+async def ensure_webhook_events_schema(conn):
+    """Create the durable CloudPayments webhook journal.
+
+    The payment service logs requests to journald, which is not available to
+    the admin-panel process as a database-backed list.  Keep one immutable
+    record per received payload so the panel can show the same events that the
+    webhook endpoint acknowledged.
+    """
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS webhook_events (
+            id BIGSERIAL PRIMARY KEY,
+            received_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            event_type TEXT,
+            transaction_id TEXT,
+            account_id TEXT,
+            status TEXT,
+            is_recurrent BOOLEAN,
+            payload JSONB NOT NULL
+        )
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_webhook_events_received_at
+        ON webhook_events (received_at DESC)
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_webhook_events_transaction_id
+        ON webhook_events (transaction_id)
+    """)
+
+
+async def record_webhook_event(
+    conn,
+    *,
+    payload: dict,
+    event_type: str | None,
+    transaction_id,
+    account_id,
+    status,
+    is_recurrent: bool,
+):
+    """Append one CloudPayments payload to the durable webhook journal."""
+    await conn.execute(
+        """
+        INSERT INTO webhook_events
+            (event_type, transaction_id, account_id, status, is_recurrent, payload)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+        """,
+        event_type,
+        str(transaction_id) if transaction_id is not None else None,
+        str(account_id) if account_id is not None else None,
+        str(status) if status is not None else None,
+        bool(is_recurrent),
+        json.dumps(payload, ensure_ascii=False, default=str),
+    )
+
+
 async def record_payment_link_visit(user_id: int):
     """Record one visit without treating it as a payment."""
     conn = await get_conn()
@@ -358,6 +414,7 @@ async def _ensure_core_schema(conn):
         "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE"
     )
     await ensure_subscription_user_fk_protection(conn)
+    await ensure_webhook_events_schema(conn)
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS payment_events (
             id SERIAL PRIMARY KEY,
@@ -415,6 +472,7 @@ async def init_db():
             )
         """)
         await ensure_message_retention_schema(conn)
+        await ensure_webhook_events_schema(conn)
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
