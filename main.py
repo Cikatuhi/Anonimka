@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
     # Migrations for the active token-charge system. Safe to run on every startup.
     conn = await database.get_conn()
     try:
+        await database.ensure_message_retention_schema(conn)
         await conn.execute("""
             ALTER TABLE subscriptions
             ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE

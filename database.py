@@ -109,6 +109,10 @@ async def _ensure_broadcast_schema(conn):
             task_id TEXT
         )
     """)
+    # Remove the legacy message-retention trigger on installations where the
+    # messages table already exists.  The helper checks for the table first,
+    # keeping startup safe on a fresh database.
+    await ensure_message_retention_schema(conn)
     await conn.execute("ALTER TABLE broadcast_jobs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMP")
     await conn.execute("ALTER TABLE broadcast_jobs ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP")
     await conn.execute("""
@@ -247,6 +251,25 @@ async def ensure_payment_link_visits_schema():
         await _ensure_payment_link_visits_schema(conn)
     finally:
         await release_conn(conn)
+
+
+async def ensure_message_retention_schema(conn):
+    """Keep the full message history in ``messages``.
+
+    Some older installations created a database-level trigger that called
+    ``clean_old_messages()`` after every insert, silently deleting older
+    messages once the table reached a fixed size.  The current application
+    does not use that retention policy, so remove only that legacy trigger.
+    Dropping a trigger does not modify any existing rows and is safe to run
+    repeatedly during startup migrations.
+    """
+    messages_table_exists = await conn.fetchval(
+        "SELECT to_regclass('public.messages') IS NOT NULL"
+    )
+    if messages_table_exists:
+        await conn.execute(
+            "DROP TRIGGER IF EXISTS trigger_clean_messages ON public.messages"
+        )
 
 
 async def record_payment_link_visit(user_id: int):
@@ -391,7 +414,8 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+        await ensure_message_retention_schema(conn)
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id SERIAL PRIMARY KEY,
