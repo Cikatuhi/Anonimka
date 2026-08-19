@@ -1042,16 +1042,24 @@ async def blocked_page(request: Request):
 async def unsubscribed_page(request: Request):
     total = 0
     users = []
-    
+    page_size = 100
+    total_pages = 1
+    try:
+        page = max(1, int(request.query_params.get("page", "1")))
+    except (TypeError, ValueError):
+        page = 1
+
     try:
         conn = await database.get_conn()
         try:
-            total = await conn.fetchval("SELECT COUNT(*) FROM unsubscribed_users")
+            total = int(await conn.fetchval("SELECT COUNT(*) FROM unsubscribed_users") or 0)
+            total_pages = max(1, (total + page_size - 1) // page_size)
+            page = min(page, total_pages)
             rows = await conn.fetch("""
-                SELECT * FROM unsubscribed_users 
-                ORDER BY unsubscribed_at DESC 
-                LIMIT 200
-            """)
+                SELECT * FROM unsubscribed_users
+                ORDER BY unsubscribed_at DESC
+                LIMIT $1 OFFSET $2
+            """, page_size, (page - 1) * page_size)
             users = [dict(row) for row in rows]
         finally:
             await database.release_conn(conn)
@@ -1117,9 +1125,16 @@ async def unsubscribed_page(request: Request):
                 <td><span style="font-family:monospace; font-size:11px; color:#8899aa;">{token_display}</span></td>
                 <td>{restore_btn}</td>
             </tr>
-            '''
+        '''
         html += '</table></div>'
-        
+
+        first_item = (page - 1) * page_size + 1
+        last_item = min(page * page_size, total)
+        if total_pages > 1:
+            previous = f'<a class="button button-secondary" href="/unsubscribed?page={page - 1}">← Предыдущая</a>' if page > 1 else ''
+            next_page = f'<a class="button button-secondary" href="/unsubscribed?page={page + 1}">Следующая →</a>' if page < total_pages else ''
+            html += f'<div class="page-actions" style="justify-content:space-between;margin-top:16px;"><span class="panel-copy">Показаны записи {first_item}–{last_item} из {total} · страница {page} из {total_pages}</span><div style="display:flex;gap:8px;">{previous}{next_page}</div></div>'
+
         html += '''
         <script>
             async function restoreUser(event, userId) {
