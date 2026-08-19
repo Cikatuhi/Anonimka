@@ -5,7 +5,8 @@ import psutil
 import re
 import aiohttp
 from html import escape
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
@@ -22,6 +23,48 @@ ADMINS = {
     "cikatuh": "1324576890",
     "glavskamer": "AK113689avip$top",
 }
+
+
+ADMIN_TIMEZONE = ZoneInfo("Europe/Samara")
+
+
+def format_admin_datetime(value, *, date_only: bool = False, include_seconds: bool = False, fallback: str = "-") -> str:
+    """Format database/API timestamps in Samara time for the admin panel.
+
+    Most legacy PostgreSQL columns are ``TIMESTAMP WITHOUT TIME ZONE`` and
+    store UTC wall-clock values.  Treat naive values as UTC before converting
+    them; timezone-aware values (including CloudPayments timestamps) are
+    converted directly.
+    """
+    if value is None:
+        return fallback
+
+    parsed = value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return fallback
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            # Keep an unexpected provider format visible rather than failing
+            # the whole admin page.
+            return text
+    elif isinstance(value, date) and not isinstance(value, datetime):
+        parsed = datetime.combine(value, time.min)
+
+    if not isinstance(parsed, datetime):
+        return str(value)
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    parsed = parsed.astimezone(ADMIN_TIMEZONE)
+
+    if date_only:
+        return parsed.strftime("%d.%m.%Y")
+    if include_seconds:
+        return parsed.strftime("%d.%m.%Y %H:%M:%S")
+    return parsed.strftime("%d.%m.%Y %H:%M")
 
 
 async def ensure_admin_indexes() -> None:
@@ -598,7 +641,7 @@ async def monitoring_data():
                 "cpu": round(float(cpu), 1),
                 "memory": round(float(memory.percent), 1),
                 "disk": round(float(disk.percent), 1),
-                "updated_at": now_msk().strftime("%d.%m.%Y %H:%M:%S МСК"),
+                "updated_at": f"{format_admin_datetime(datetime.now(ADMIN_TIMEZONE), include_seconds=True)} Самара",
             },
             headers={"Cache-Control": "no-store, max-age=0"},
         )
@@ -769,12 +812,12 @@ async def users_page(request: Request):
     html += f'<div class="stats"><div class="stat-card"><div class="stat-number">{total}</div><div class="stat-label">Всего пользователей</div></div></div>'
 
     if rows:
-        html += '<div class="table-container"><table><tr><th>ID</th><th>Username</th><th>Имя</th><th>Регистрация</th></tr>'
+        html += '<div class="table-container"><table><tr><th>ID</th><th>Username</th><th>Имя</th><th>Регистрация (Самара)</th></tr>'
         for row in rows:
             username = escape(str(row.get('username') or '-'))
             first_name = escape(str(row.get('first_name') or '-'))
             registered_at = row.get('registered_at')
-            registered_text = registered_at.strftime('%d.%m.%Y %H:%M') if registered_at else '-'
+            registered_text = format_admin_datetime(registered_at)
             html += f"<tr><td>{row['telegram_id']}</td><td>{username}</td><td>{first_name}</td><td>{registered_text}</td></tr>"
         html += '</table></div>'
         if total_pages > 1:
@@ -822,7 +865,7 @@ async def messages_page(request: Request):
     
     html = '<div class="page-title">💬 Сообщения</div>'
     if rows:
-        html += '<div class="table-container"><table><tr><th>ID</th><th>От</th><th>Кому</th><th>Тип</th><th>Сообщение</th><th>Дата</th></tr>'
+        html += '<div class="table-container"><table><tr><th>ID</th><th>От</th><th>Кому</th><th>Тип</th><th>Сообщение</th><th>Дата (Самара)</th></tr>'
         for row in rows:
             sender = row.get('sender_username') or row.get('sender_name') or 'Неизвестно'
             recipient = row.get('recipient_username') or row.get('recipient_name') or 'Неизвестно'
@@ -833,7 +876,7 @@ async def messages_page(request: Request):
                 <td>@{recipient}</td>
                 <td><span class="badge badge-text">{row['content_type']}</span></td>
                 <td>{row['content'][:50]}{'...' if len(row['content'] or '') > 50 else ''}</td>
-                <td>{row['created_at'].strftime('%d.%m.%Y %H:%M') if row['created_at'] else '-'}</td>
+                <td>{format_admin_datetime(row['created_at'])}</td>
             </tr>
             '''
         html += '</table></div>'
@@ -950,8 +993,8 @@ async def subscriptions_page(request: Request):
                     <th>ID</th>
                     <th>Пользователь</th>
                     <th>План</th>
-                    <th>Начало</th>
-                    <th>Окончание</th>
+                    <th>Начало (Самара)</th>
+                    <th>Окончание (Самара)</th>
                     <th>Статус</th>
                     <th>Действие</th>
                 </tr>
@@ -959,7 +1002,7 @@ async def subscriptions_page(request: Request):
         for row in rows:
             raw_status = str(row.get('status') or 'unknown')
             status_color = "#7c3aed" if raw_status == 'active' else "#ff4488"
-            end_date_str = row['end_date'].strftime('%d.%m.%Y') if row['end_date'] else '∞'
+            end_date_str = format_admin_datetime(row['end_date'], date_only=True, fallback='∞')
 
             block_btn = ''
             if raw_status in ['active', 'pending']:
@@ -975,7 +1018,7 @@ async def subscriptions_page(request: Request):
                 <td>{row['id']}</td>
                 <td>@{escape(str(row.get('username') or row.get('first_name') or row['user_id']))}</td>
                 <td>{escape(str(row.get('plan') or '-'))}</td>
-                <td>{row['start_date'].strftime('%d.%m.%Y') if row['start_date'] else '-'}</td>
+                <td>{format_admin_datetime(row['start_date'], date_only=True)}</td>
                 <td>{end_date_str}</td>
                 <td><span style="color:{status_color};">{escape(raw_status)}</span></td>
                 <td>{block_btn}</td>
@@ -1045,9 +1088,9 @@ async def blocked_page(request: Request):
     html += f'<div class="stats"><div class="stat-card"><div class="stat-number">{total}</div><div class="stat-label">Заблокировали бота</div></div></div>'
     
     if rows:
-        html += '<div class="table-container"><table><tr><th>ID</th><th>Username</th><th>Имя</th><th>Заблокирован</th></tr>'
+        html += '<div class="table-container"><table><tr><th>ID</th><th>Username</th><th>Имя</th><th>Заблокирован (Самара)</th></tr>'
         for row in rows:
-            html += f"<tr><td>{row['telegram_id']}</td><td>{row.get('username') or '-'}</td><td>{row.get('first_name') or '-'}</td><td>{row['blocked_at'].strftime('%d.%m.%Y %H:%M') if row['blocked_at'] else '-'}</td></tr>"
+            html += f"<tr><td>{row['telegram_id']}</td><td>{row.get('username') or '-'}</td><td>{row.get('first_name') or '-'}</td><td>{format_admin_datetime(row['blocked_at'])}</td></tr>"
         html += '</table></div>'
     else:
         html += '<div class="empty">😕 Пользователей в ЧС нет</div>'
@@ -1103,7 +1146,7 @@ async def unsubscribed_page(request: Request):
                     <th>ID</th>
                     <th>Username</th>
                     <th>Имя</th>
-                    <th>Дата отписки</th>
+                    <th>Дата отписки (Самара)</th>
                     <th>Причина</th>
                     <th>Токен</th>
                     <th>Действие</th>
@@ -1138,7 +1181,7 @@ async def unsubscribed_page(request: Request):
                 <td>{row['telegram_id']}</td>
                 <td>{row.get('username') or '-'}</td>
                 <td>{row.get('first_name') or '-'}</td>
-                <td>{row['unsubscribed_at'].strftime('%d.%m.%Y %H:%M') if row['unsubscribed_at'] else '-'}</td>
+                <td>{format_admin_datetime(row['unsubscribed_at'])}</td>
                 <td>{reason}</td>
                 <td><span style="font-family:monospace; font-size:11px; color:#8899aa;">{token_display}</span></td>
                 <td>{restore_btn}</td>
@@ -1982,7 +2025,7 @@ async def broadcast_list(request: Request):
     '''
     
     if rows:
-        html += '<div class="table-container"><table><tr><th>ID</th><th>Статус</th><th>Всего</th><th>Отправлено</th><th>Ошибок</th><th>Прогресс</th><th>Создана</th><th>Действие</th></tr>'
+        html += '<div class="table-container"><table><tr><th>ID</th><th>Статус</th><th>Всего</th><th>Отправлено</th><th>Ошибок</th><th>Прогресс</th><th>Создана (Самара)</th><th>Действие</th></tr>'
         for row in rows:
             status_color = {
                 'pending': '#8899aa',
@@ -2012,7 +2055,7 @@ async def broadcast_list(request: Request):
                 <td>{row['sent_users']}</td>
                 <td>{row['failed_users']}</td>
                 <td>{row['progress']:.1f}%</td>
-                <td>{row['created_at'].strftime('%d.%m.%Y %H:%M') if row['created_at'] else '-'}</td>
+                <td>{format_admin_datetime(row['created_at'])}</td>
                 <td><a href="/broadcast?job={row['id']}" style="font-weight:700; text-decoration:none;">Подробнее →</a></td>
             </tr>
             '''
@@ -2237,7 +2280,7 @@ async def payment_link_visits_page(request: Request):
         html += '''
         <div class="table-container">
             <table>
-                <tr><th>Пользователь</th><th>Telegram ID</th><th>Переходов</th><th>Первый переход</th><th>Последний переход</th></tr>
+                <tr><th>Пользователь</th><th>Telegram ID</th><th>Переходов</th><th>Первый переход (Самара)</th><th>Последний переход (Самара)</th></tr>
         '''
         for row in rows:
             username = row.get("username")
@@ -2249,8 +2292,8 @@ async def payment_link_visits_page(request: Request):
             else:
                 person = "Без имени"
             user_id = escape(str(row["user_id"]))
-            first_visit = row["first_visited_at"].strftime("%d.%m.%Y %H:%M") if row["first_visited_at"] else "—"
-            last_visit = row["last_visited_at"].strftime("%d.%m.%Y %H:%M") if row["last_visited_at"] else "—"
+            first_visit = format_admin_datetime(row["first_visited_at"], fallback="—")
+            last_visit = format_admin_datetime(row["last_visited_at"], fallback="—")
             html += f'''
                 <tr>
                     <td><strong>{person}</strong></td>
@@ -2284,7 +2327,7 @@ async def payments_page(request: Request):
     has_next_page = False
     api_error = None
     try:
-        now = now_msk()
+        now = datetime.now(ADMIN_TIMEZONE)
         period_end = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         period_start = period_end - timedelta(days=1)
 
@@ -2306,7 +2349,8 @@ async def payments_page(request: Request):
 
         if first_record:
             if first_record.tzinfo is None:
-                first_record = first_record.replace(tzinfo=now.tzinfo)
+                # Legacy TIMESTAMP columns store UTC wall-clock values.
+                first_record = first_record.replace(tzinfo=timezone.utc)
             period_start = first_record.astimezone(now.tzinfo).replace(
                 hour=0, minute=0, second=0, microsecond=0
             ) - timedelta(days=1)
@@ -2352,7 +2396,7 @@ async def payments_page(request: Request):
         html += '''
         <div class="table-container">
             <table>
-                <tr><th>Пользователь</th><th>Сумма</th><th>Статус</th><th>Дата</th><th>TransactionId</th></tr>
+                <tr><th>Пользователь</th><th>Сумма</th><th>Статус</th><th>Дата (Самара)</th><th>TransactionId</th></tr>
         '''
         for payment in payments:
             account_id = escape(str(payment.get("AccountId") or "—"))
@@ -2361,8 +2405,11 @@ async def payments_page(request: Request):
             status_text = "✅ Успешный" if status == "Completed" else f"❌ {status}"
             status_class = "status-ok" if status == "Completed" else "status-down"
             amount = float(payment.get("Amount") or 0)
-            created_at = payment.get("CreatedDateIso") or payment.get("CreatedDate") or "—"
-            created_at = escape(str(created_at).replace("T", " ")[:19])
+            created_at = format_admin_datetime(
+                payment.get("CreatedDateIso") or payment.get("CreatedDate"),
+                fallback="—",
+            )
+            created_at = escape(created_at)
             html += f'''
                 <tr>
                     <td><strong>{account_id}</strong></td>

@@ -1,0 +1,75 @@
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Configure SSH
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/production_key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/production_key" "$HOME/.ssh/known_hosts"
+
+      - name: Pull and restart services
+        shell: bash
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_PATH: ${{ secrets.PROD_PATH }}
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test -n "$PROD_HOST"
+          test -n "$PROD_PORT"
+          test -n "$PROD_USER"
+          test -n "$PROD_PATH"
+          ssh \
+            -i "$HOME/.ssh/production_key" \
+            -p "$PROD_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=2 \
+            "$PROD_USER@$PROD_HOST" \
+            "DEPLOY_SHA='$DEPLOY_SHA' PROD_PATH='$PROD_PATH' bash -se" <<'REMOTE'
+          set -euo pipefail
+          cd "$PROD_PATH"
+          git pull --ff-only origin main
+          test "$(git rev-parse HEAD)" = "$DEPLOY_SHA"
+          sudo -n systemctl restart webhook-handler.service
+          sudo -n systemctl restart worker.service
+          sudo -n systemctl restart admin-panel.service
+          sudo -n systemctl restart payment-site.service
+          sudo -n systemctl restart payment-system.service
+          sudo -n systemctl is-active --quiet webhook-handler.service
+          sudo -n systemctl is-active --quiet worker.service
+          sudo -n systemctl is-active --quiet admin-panel.service
+          sudo -n systemctl is-active --quiet payment-site.service
+          sudo -n systemctl is-active --quiet payment-system.service
+          REMOTE
