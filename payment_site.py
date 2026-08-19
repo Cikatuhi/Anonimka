@@ -14,6 +14,7 @@ import database
 
 SITE_URL = os.getenv("SITE_URL", "https://secretky.ru").rstrip("/")
 DOC1_URL = f"{SITE_URL}/doc1"
+DOC2_URL = f"{SITE_URL}/doc2"
 DOC3_URL = f"{SITE_URL}/doc3"
 CLOUDPAYMENTS_PUBLIC_ID = os.getenv(
     "CLOUDPAYMENTS_PUBLIC_ID",
@@ -889,13 +890,13 @@ async def payment_page(user_id: int, request: Request):
                     <div class="checkbox-item">
                         <input type="checkbox" id="policy_check" onchange="checkCheckboxes()">
                         <label for="policy_check">
-                            Я согласен на обработку персональных данных и принимаю <a href="{DOC1_URL}" target="_blank">условия использования</a>
+                            Вы даете согласие на обработку персональных данных, а также принимаете <a href="{DOC2_URL}" target="_blank">условия публичной оферты</a>
                         </label>
                     </div>
                     <div class="checkbox-item">
                         <input type="checkbox" id="terms_check" onchange="checkCheckboxes()">
                         <label for="terms_check">
-                            Я согласен с <a href="{DOC3_URL}" target="_blank">правилами рекуррентных платежей</a> и условиями по <a href="{DOC3_URL}" target="_blank">тарифам</a>: 5 ₽ за 1 день, далее 699 ₽ за 7 дней. Возможны списания 299 ₽ за 3 дня или 99 ₽ за 1 день; отмена доступна в любой момент
+                            Вы подтверждаете согласие с <a href="{DOC3_URL}" target="_blank">правилами рекуррентных платежей</a>. Сейчас вы платите 5₽ за пробный период Премиум-подписки за 1 день, далее 699₽ раз в 7 дней, либо 299₽ раз в 3 дня, либо 99₽ раз в 1 день согласно <a href="{DOC3_URL}" target="_blank">тарифам</a>. Отменить можно в любой момент.
                         </label>
                     </div>
                 </div>
@@ -903,8 +904,8 @@ async def payment_page(user_id: int, request: Request):
                 <div id="popup-error" class="error-text">⚠️ Пожалуйста, примите все условия для продолжения</div>
 
                 <div class="btn-wrap">
-                    <button id="popupBtn" class="btn" onclick="closePopupAndStartPayment()" disabled>Отметьте оба пункта</button>
-                    <div class="btn-sub">После второй галочки откроется защищённая форма оплаты.</div>
+                    <button id="popupBtn" class="btn" onclick="closePopupAndStartPayment()" disabled>Получить Премиум</button>
+                    <div class="btn-sub">Отменить можно в любой момент.</div>
                 </div>
             </div>
         </div>
