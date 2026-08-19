@@ -749,26 +749,6 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.answer("❌ Нет пользователей")
         return
     
-    has_seen = await database.has_user_seen_premium_offer(user_id)
-    
-    if not has_seen:
-        await database.mark_premium_offer_as_seen(user_id)
-        text = (
-            "💌 <b>Узнайте кто отправил это послание - приобретите пробный Премиум за 5₽!</b> 👇\n\n"
-        )
-        keyboard = [
-            [InlineKeyboardButton("💳 Получить Премиум", callback_data="buy_premium")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.message.reply_text(
-            text=text,
-            reply_markup=reply_markup,
-            parse_mode="HTML",
-            disable_web_page_preview=True
-        )
-        await query.answer("💳 Нажмите на кнопку для оплаты")
-        return
-    
     payment_link = f"{SITE_URL}/pay/{user_id}"
     text = "<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>"
     keyboard = [
@@ -818,36 +798,6 @@ async def show_sender_as_new_message(query, sender_id):
             text="😅 Произошла ошибка. Попробуйте позже.",
             parse_mode="HTML"
         )
-
-
-async def buy_premium_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    user = query.from_user
-    user_id = user.id
-    username = user.username or "без_юзернейма"
-    first_name = user.first_name or "Пользователь"
-    
-    await database.register_user(user_id, username, first_name)
-        
-    payment_link = f"{SITE_URL}/pay/{user_id}"
-    
-    text = (
-        f"<b>💌 Узнайте, кто отправил вам анонимное сообщение – всего за 5₽!</b>\n\n"
-        f"Нажмите на кнопку ниже, чтобы оплатить."
-    )
-    
-    keyboard = [
-        [InlineKeyboardButton("💳 Оплатить 5₽", url=payment_link)]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        text=text,
-        reply_markup=reply_markup,
-        parse_mode="HTML"
-    )
 
 
 async def show_sender(query, user_id):
@@ -1075,7 +1025,6 @@ def main():
     app.add_handler(CallbackQueryHandler(subgram_callback_handler, pattern=r"^subgram-op$"))
     app.add_handler(CallbackQueryHandler(reply_anon_handler, pattern="reply_"))
     app.add_handler(CallbackQueryHandler(who_is_it_handler, pattern="who_is_it"))
-    app.add_handler(CallbackQueryHandler(buy_premium_handler, pattern="buy_premium"))
     app.add_handler(CallbackQueryHandler(confirm_unsubscribe_handler, pattern="confirm_unsubscribe"))
     app.add_handler(CallbackQueryHandler(cancel_unsubscribe_handler, pattern="cancel_unsubscribe"))
     app.add_handler(CallbackQueryHandler(unknown_callback_handler))
