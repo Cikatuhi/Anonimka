@@ -1386,7 +1386,25 @@ async def broadcast_page(request: Request):
     try:
         conn = await database.get_conn()
         try:
-            total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
+            # Показываем фактическую аудиторию рассылки, а не общее число
+            # записей в users. Заблокированные и отписавшиеся пользователи
+            # всё равно исключаются при создании broadcast_job_recipients.
+            total_users = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM users
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM blocked_users
+                    WHERE blocked_users.telegram_id = users.telegram_id
+                )
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM unsubscribed_users
+                    WHERE unsubscribed_users.telegram_id = users.telegram_id
+                )
+                """
+            )
             
             if not job_id:
                 row = await conn.fetchrow(
