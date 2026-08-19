@@ -751,6 +751,68 @@ async def monitoring_data():
         )
 
 
+@app.get("/dashboard/data")
+async def dashboard_data():
+    """Return fresh dashboard counters for background updates."""
+    try:
+        conn = await database.get_conn()
+        try:
+            stats = await conn.fetchrow(
+                """
+                SELECT
+                    (
+                        SELECT COUNT(*)
+                        FROM users
+                        WHERE NOT EXISTS (
+                            SELECT 1
+                            FROM blocked_users
+                            WHERE blocked_users.telegram_id = users.telegram_id
+                        )
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM unsubscribed_users
+                            WHERE unsubscribed_users.telegram_id = users.telegram_id
+                        )
+                    ) AS total_users,
+                    (SELECT COUNT(*) FROM messages) AS total_messages,
+                    (
+                        SELECT COUNT(*)
+                        FROM subscriptions
+                        WHERE status = 'active'
+                          AND (end_date IS NULL OR end_date > NOW())
+                    ) AS total_subscriptions,
+                    (SELECT COUNT(*) FROM payment_link_visits) AS payment_visitors,
+                    EXISTS (
+                        SELECT 1
+                        FROM service_heartbeats
+                        WHERE service = 'worker'
+                          AND heartbeat_at >= NOW() - INTERVAL '2 minutes'
+                    ) AS worker_alive
+                """
+            )
+        finally:
+            await database.release_conn(conn)
+
+        return JSONResponse(
+            content={
+                "ok": True,
+                "total_users": int(stats["total_users"] or 0),
+                "total_messages": int(stats["total_messages"] or 0),
+                "total_subscriptions": int(stats["total_subscriptions"] or 0),
+                "payment_visitors": int(stats["payment_visitors"] or 0),
+                "worker_alive": bool(stats["worker_alive"]),
+            },
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
+    except Exception as exc:
+        print(f"❌ Dashboard counters: {exc}", flush=True)
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "Не удалось получить показатели дашборда"},
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     total_users = 0
@@ -820,10 +882,10 @@ async def dashboard(request: Request):
         </div>
     </div>
     <div class="stats">
-        <div class="stat-card"><span class="icon">◎</span><div class="stat-number">{total_users}</div><div class="stat-label">Доступные пользователи</div></div>
-        <div class="stat-card"><span class="icon">◇</span><div class="stat-number">{total_subscriptions}</div><div class="stat-label">Активные подписки</div></div>
-        <div class="stat-card"><span class="icon">≋</span><div class="stat-number">{total_messages}</div><div class="stat-label">Сообщений отправлено</div></div>
-        <div class="stat-card"><span class="icon">↗</span><div class="stat-number">{payment_visitors}</div><div class="stat-label">Перешли к оплате</div></div>
+        <div class="stat-card"><span class="icon">◎</span><div class="stat-number" id="dashboard-total-users">{total_users}</div><div class="stat-label">Доступные пользователи</div></div>
+        <div class="stat-card"><span class="icon">◇</span><div class="stat-number" id="dashboard-total-subscriptions">{total_subscriptions}</div><div class="stat-label">Активные подписки</div></div>
+        <div class="stat-card"><span class="icon">≋</span><div class="stat-number" id="dashboard-total-messages">{total_messages}</div><div class="stat-label">Сообщений отправлено</div></div>
+        <div class="stat-card"><span class="icon">↗</span><div class="stat-number" id="dashboard-payment-visitors">{payment_visitors}</div><div class="stat-label">Перешли к оплате</div></div>
     </div>
     <div class="quick-grid">
         <section class="panel">
@@ -865,6 +927,25 @@ async def dashboard(request: Request):
                 document.getElementById('database-health').className = 'status-pill status-down';
             }}
         }}
+        async function refreshDashboardStats() {{
+            try {{
+                const response = await fetch('/dashboard/data', {{ cache: 'no-store' }});
+                if (!response.ok) return;
+                const data = await response.json();
+                if (!data.ok) return;
+                document.getElementById('dashboard-total-users').textContent = data.total_users.toLocaleString('ru-RU');
+                document.getElementById('dashboard-total-subscriptions').textContent = data.total_subscriptions.toLocaleString('ru-RU');
+                document.getElementById('dashboard-total-messages').textContent = data.total_messages.toLocaleString('ru-RU');
+                document.getElementById('dashboard-payment-visitors').textContent = data.payment_visitors.toLocaleString('ru-RU');
+                const worker = document.getElementById('worker-health');
+                worker.textContent = data.worker_alive ? 'Работает' : 'Нет свежего сигнала';
+                worker.className = 'status-pill status-' + (data.worker_alive ? 'ok' : 'degraded');
+            }} catch (error) {{
+                // Keep the last known counters visible during a temporary DB/network error.
+            }}
+        }}
+        refreshDashboardStats();
+        window.setInterval(refreshDashboardStats, 10000);
         window.setInterval(refreshSystemHealth, 60000);
     </script>
     '''
