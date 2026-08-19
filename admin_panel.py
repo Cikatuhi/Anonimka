@@ -1142,12 +1142,29 @@ async def subscriptions_page(request: Request):
 async def blocked_page(request: Request):
     rows = []
     total = 0
-    
+    page_size = 100
+    total_pages = 1
+
+    try:
+        page = max(1, int(request.query_params.get("page", "1")))
+    except (TypeError, ValueError):
+        page = 1
+
     try:
         conn = await database.get_conn()
         try:
-            rows = await conn.fetch("SELECT * FROM blocked_users ORDER BY blocked_at DESC")
-            total = len(rows)
+            total = int(await conn.fetchval("SELECT COUNT(*) FROM blocked_users") or 0)
+            total_pages = max(1, (total + page_size - 1) // page_size)
+            page = min(page, total_pages)
+            rows = await conn.fetch(
+                """
+                SELECT * FROM blocked_users
+                ORDER BY blocked_at DESC NULLS LAST, telegram_id DESC
+                LIMIT $1 OFFSET $2
+                """,
+                page_size,
+                (page - 1) * page_size,
+            )
         finally:
             await database.release_conn(conn)
     except Exception as e:
@@ -1161,6 +1178,13 @@ async def blocked_page(request: Request):
         for row in rows:
             html += f"<tr><td>{row['telegram_id']}</td><td>{row.get('username') or '-'}</td><td>{row.get('first_name') or '-'}</td><td>{format_admin_datetime(row['blocked_at'])}</td></tr>"
         html += '</table></div>'
+
+        first_item = (page - 1) * page_size + 1
+        last_item = min(page * page_size, total)
+        if total_pages > 1:
+            previous = f'<a class="button button-secondary" href="/blocked?page={page - 1}">← Предыдущая</a>' if page > 1 else ''
+            next_page = f'<a class="button button-secondary" href="/blocked?page={page + 1}">Следующая →</a>' if page < total_pages else ''
+            html += f'<div class="page-actions" style="justify-content:space-between;margin-top:16px;"><span class="panel-copy">Показаны записи {first_item}–{last_item} из {total} · страница {page} из {total_pages}</span><div style="display:flex;gap:8px;">{previous}{next_page}</div></div>'
     else:
         html += '<div class="empty">😕 Пользователей в ЧС нет</div>'
     
