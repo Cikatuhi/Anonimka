@@ -805,6 +805,8 @@ BASE_HTML = '''
         .subgram-dashboard-panel .quick-link { transition: .16s ease; }
         .subgram-dashboard-panel button.quick-link { font-family: inherit; text-align: left; }
         .subgram-dashboard-panel button.quick-link:disabled { opacity: .6; cursor: wait; }
+        .subgram-stat-card { cursor: pointer; }
+        .subgram-stat-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         .table-container { background: var(--surface); border-radius: 15px; overflow-x: auto; border: 1px solid var(--line); box-shadow: var(--card-shadow); }
         table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 13px; }
         th { background: var(--table-head); color: var(--muted); font-weight: 750; font-size: 10px; text-transform: uppercase; letter-spacing: .07em; padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--line); }
@@ -1301,16 +1303,9 @@ async def dashboard(request: Request):
         <div class="stat-card"><span class="icon">◇</span><div class="stat-number" id="dashboard-total-subscriptions">{format_dashboard_number(total_subscriptions)}</div><div class="stat-label">Активные подписки</div><div class="stat-today" id="dashboard-subscriptions-today">+{format_dashboard_number(subscriptions_today)} за сегодня</div>{dashboard_sparkline_svg(subscriptions_today_chart, 'dashboard-subscriptions-chart')}</div>
         <div class="stat-card"><span class="icon">≋</span><div class="stat-number" id="dashboard-total-messages">{format_dashboard_number(total_messages)}</div><div class="stat-label">Сообщений отправлено</div><div class="stat-today" id="dashboard-messages-today">+{format_dashboard_number(messages_today)} за сегодня</div>{dashboard_sparkline_svg(messages_today_chart, 'dashboard-messages-chart')}</div>
         <div class="stat-card"><span class="icon">↗</span><div class="stat-number" id="dashboard-payment-visitors">{format_dashboard_number(payment_visitors)}</div><div class="stat-label">Перешли к оплате</div><div class="stat-today" id="dashboard-payment-visitors-today">+{format_dashboard_number(payment_visitors_today)} за сегодня</div>{dashboard_sparkline_svg(payment_visitors_today_chart, 'dashboard-payment-visitors-chart')}</div>
+        <div class="stat-card subgram-stat-card" role="button" tabindex="0" id="refresh-subgram-balance"><span class="icon">₽</span><div class="stat-number" id="dashboard-subgram-balance">{subgram_balance} ₽</div><div class="stat-label">Баланс SubGram</div><div class="stat-today" id="dashboard-subgram-status">Обновляется автоматически</div></div>
     </div>
     <div class="quick-grid">
-        <section class="panel subgram-dashboard-panel">
-            <div class="panel-title">Баланс SubGram</div>
-            <p class="panel-copy">Текущий баланс рекламной платформы.</p>
-            <div class="subgram-dashboard-balance" id="dashboard-subgram-balance">{subgram_balance} ₽</div>
-            <div class="status-pill status-{subgram_status_class}" id="dashboard-subgram-status" title="{escape(str(subgram_snapshot.get('error') or ''))}">{subgram_status}</div>
-            <button class="quick-link" type="button" id="refresh-subgram-balance" style="margin-top: 12px; width: 100%; border: 0; cursor: pointer;"><span>Обновить баланс</span><span>↻</span></button>
-            <a class="quick-link" href="/subgram" style="margin-top: 18px;"><span>Открыть статистику SubGram</span><span>→</span></a>
-        </section>
         <section class="panel">
             <div class="panel-title">Состояние системы</div>
             <p class="panel-copy">Проверяется автоматически при открытии и обновляется раз в минуту.</p>
@@ -1391,8 +1386,7 @@ async def dashboard(request: Request):
         }}
         const refreshSubgramButton = document.getElementById('refresh-subgram-balance');
         if (refreshSubgramButton) refreshSubgramButton.addEventListener('click', async () => {{
-            refreshSubgramButton.disabled = true;
-            try {{ await refreshDashboardStats(true); }} finally {{ refreshSubgramButton.disabled = false; }}
+            await refreshDashboardStats(true);
         }});
         const dashboardEvents = new EventSource('/dashboard/events');
         dashboardEvents.addEventListener('dashboard', refreshDashboardStats);
