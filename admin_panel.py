@@ -799,6 +799,12 @@ BASE_HTML = '''
         .quick-links { display: grid; gap: 8px; margin-top: 18px; }
         .quick-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 13px; color: var(--ink); text-decoration: none; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 11px; font-size: 13px; font-weight: 650; }
         .quick-link:hover { border-color: var(--line-strong); background: var(--accent-soft); }
+        .subgram-dashboard-panel { min-height: 210px; }
+        .subgram-dashboard-balance { margin-top: 5px; color: var(--ink); font-size: 30px; line-height: 1.1; font-weight: 780; letter-spacing: -.03em; }
+        .subgram-dashboard-panel .status-pill { margin-top: 11px; }
+        .subgram-dashboard-panel .quick-link { transition: .16s ease; }
+        .subgram-dashboard-panel button.quick-link { font-family: inherit; text-align: left; }
+        .subgram-dashboard-panel button.quick-link:disabled { opacity: .6; cursor: wait; }
         .table-container { background: var(--surface); border-radius: 15px; overflow-x: auto; border: 1px solid var(--line); box-shadow: var(--card-shadow); }
         table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 13px; }
         th { background: var(--table-head); color: var(--muted); font-weight: 750; font-size: 10px; text-transform: uppercase; letter-spacing: .07em; padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--line); }
