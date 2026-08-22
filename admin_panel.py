@@ -1,6 +1,7 @@
 import asyncio
 import asyncpg
 import json
+import time
 import uuid
 import psutil
 import re
@@ -32,6 +33,19 @@ ADMIN_DASHBOARD_CHANNEL = "admin_dashboard_changed"
 _dashboard_subscribers: set[asyncio.Queue] = set()
 _dashboard_listener_task: asyncio.Task | None = None
 _dashboard_listener_stop: asyncio.Event | None = None
+
+# SubGram is an external service, so PostgreSQL cannot notify us when its
+# balance changes.  Keep a short process-local cache to avoid calling the
+# provider for every dashboard invalidation (a busy bot can generate many
+# database notifications in a short period).
+SUBGRAM_DASHBOARD_CACHE_TTL = 60.0
+_subgram_balance_cache = {
+    "expires_at": 0.0,
+    "value": None,
+    "ok": False,
+    "error": None,
+}
+_subgram_balance_lock = asyncio.Lock()
 
 
 def _publish_dashboard_event(payload: str = "changed") -> None:
@@ -185,6 +199,54 @@ def dashboard_now_utc_naive() -> datetime:
 def format_dashboard_number(value) -> str:
     """Format dashboard counters like the reference UI (space-separated thousands)."""
     return f"{int(value or 0):,}".replace(",", " ")
+
+
+def format_subgram_balance(value) -> str:
+    """Format a SubGram balance for the compact dashboard card."""
+    if value is None:
+        return "—"
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    return f"{amount:,.2f}".replace(",", " ").replace(".", ",")
+
+
+async def get_dashboard_subgram_balance() -> dict:
+    """Return a cached SubGram balance snapshot for the dashboard.
+
+    A cache hit is served without network or database work.  The next request
+    after the TTL refreshes the value once under a lock, so concurrent admins
+    do not create a burst of identical SubGram API calls.
+    """
+    now = time.monotonic()
+    if now < _subgram_balance_cache["expires_at"]:
+        return dict(_subgram_balance_cache)
+
+    async with _subgram_balance_lock:
+        now = time.monotonic()
+        if now < _subgram_balance_cache["expires_at"]:
+            return dict(_subgram_balance_cache)
+
+        try:
+            response = await database.get_subgram_balance()
+            ok = response.get("status") == "ok"
+            value = response.get("balance") if ok else None
+            error = None if ok else str(response.get("message") or "SubGram недоступен")
+        except Exception as exc:
+            ok = False
+            value = None
+            error = str(exc)
+
+        _subgram_balance_cache.update(
+            {
+                "expires_at": time.monotonic() + SUBGRAM_DASHBOARD_CACHE_TTL,
+                "value": value,
+                "ok": ok,
+                "error": error,
+            }
+        )
+        return dict(_subgram_balance_cache)
 
 
 def dashboard_sparkline_svg(values, chart_id: str) -> str:
@@ -1073,8 +1135,10 @@ async def monitoring_data():
 
 
 @app.get("/dashboard/data")
-async def dashboard_data():
+async def dashboard_data(request: Request):
     """Return one fresh dashboard snapshot after an SSE invalidation."""
+    if request.query_params.get("refresh") == "1":
+        _subgram_balance_cache["expires_at"] = 0.0
     try:
         conn = await database.get_conn()
         try:
@@ -1085,6 +1149,8 @@ async def dashboard_data():
             )
         finally:
             await database.release_conn(conn)
+
+        subgram_snapshot = await get_dashboard_subgram_balance()
 
         return JSONResponse(
             content={
@@ -1102,6 +1168,9 @@ async def dashboard_data():
                 "messages_today_chart": list(stats["messages_today_chart"] or []),
                 "payment_visitors_today_chart": list(stats["payment_visitors_today_chart"] or []),
                 "worker_alive": bool(stats["worker_alive"]),
+                "subgram_balance": format_subgram_balance(subgram_snapshot.get("value")),
+                "subgram_ok": bool(subgram_snapshot.get("ok")),
+                "subgram_error": subgram_snapshot.get("error"),
             },
             headers={"Cache-Control": "no-store, max-age=0"},
         )
@@ -1168,6 +1237,11 @@ async def dashboard(request: Request):
     messages_today_chart = []
     payment_visitors_today_chart = []
     worker_alive = False
+    subgram_snapshot = {
+        "value": None,
+        "ok": False,
+        "error": None,
+    }
     
     try:
         conn = await database.get_conn()
@@ -1197,8 +1271,19 @@ async def dashboard(request: Request):
         import traceback
         traceback.print_exc()
 
+    # SubGram is external to PostgreSQL; its cached snapshot is independent
+    # from the database query so a temporary DB error does not hide the card.
+    subgram_snapshot = await get_dashboard_subgram_balance()
+
     worker_status = "ok" if worker_alive else "degraded"
     worker_label = "Работает" if worker_alive else "Нет свежего сигнала"
+    subgram_balance = format_subgram_balance(subgram_snapshot.get("value"))
+    subgram_status_class = "ok" if subgram_snapshot.get("ok") else "degraded"
+    subgram_status = (
+        "Обновляется автоматически"
+        if subgram_snapshot.get("ok")
+        else "Не удалось получить баланс"
+    )
     content = f'''
     <div class="page-heading">
         <div>
@@ -1216,15 +1301,13 @@ async def dashboard(request: Request):
         <div class="stat-card"><span class="icon">↗</span><div class="stat-number" id="dashboard-payment-visitors">{format_dashboard_number(payment_visitors)}</div><div class="stat-label">Перешли к оплате</div><div class="stat-today" id="dashboard-payment-visitors-today">+{format_dashboard_number(payment_visitors_today)} за сегодня</div>{dashboard_sparkline_svg(payment_visitors_today_chart, 'dashboard-payment-visitors-chart')}</div>
     </div>
     <div class="quick-grid">
-        <section class="panel">
-            <div class="panel-title">Быстрые действия</div>
-            <p class="panel-copy">Самые частые операции собраны в одном месте.</p>
-            <div class="quick-links">
-                <a class="quick-link" href="/broadcast"><span>Запустить новую рассылку</span><span>→</span></a>
-                <a class="quick-link" href="/subscriptions"><span>Проверить подписки</span><span>→</span></a>
-                <a class="quick-link" href="/payments"><span>Открыть платежную статистику</span><span>→</span></a>
-                <a class="quick-link" href="/payment-visits"><span>Посмотреть переходы к оплате</span><span>→</span></a>
-            </div>
+        <section class="panel subgram-dashboard-panel">
+            <div class="panel-title">Баланс SubGram</div>
+            <p class="panel-copy">Текущий баланс рекламной платформы.</p>
+            <div class="subgram-dashboard-balance" id="dashboard-subgram-balance">{subgram_balance} ₽</div>
+            <div class="status-pill status-{subgram_status_class}" id="dashboard-subgram-status" title="{escape(str(subgram_snapshot.get('error') or ''))}">{subgram_status}</div>
+            <button class="quick-link" type="button" id="refresh-subgram-balance" style="margin-top: 12px; width: 100%; border: 0; cursor: pointer;"><span>Обновить баланс</span><span>↻</span></button>
+            <a class="quick-link" href="/subgram" style="margin-top: 18px;"><span>Открыть статистику SubGram</span><span>→</span></a>
         </section>
         <section class="panel">
             <div class="panel-title">Состояние системы</div>
@@ -1255,9 +1338,9 @@ async def dashboard(request: Request):
                 document.getElementById('database-health').className = 'status-pill status-down';
             }}
         }}
-        async function refreshDashboardStats() {{
+        async function refreshDashboardStats(forceSubgram = false) {{
             try {{
-                const response = await fetch('/dashboard/data', {{ cache: 'no-store' }});
+                const response = await fetch('/dashboard/data' + (forceSubgram ? '?refresh=1' : ''), {{ cache: 'no-store' }});
                 if (!response.ok) return;
                 const data = await response.json();
                 if (!data.ok) return;
@@ -1292,10 +1375,23 @@ async def dashboard(request: Request):
                 const worker = document.getElementById('worker-health');
                 worker.textContent = data.worker_alive ? 'Работает' : 'Нет свежего сигнала';
                 worker.className = 'status-pill status-' + (data.worker_alive ? 'ok' : 'degraded');
+                const subgramBalance = document.getElementById('dashboard-subgram-balance');
+                const subgramStatus = document.getElementById('dashboard-subgram-status');
+                if (subgramBalance) subgramBalance.textContent = (data.subgram_balance || '—') + ' ₽';
+                if (subgramStatus) {{
+                    subgramStatus.textContent = data.subgram_ok ? 'Обновляется автоматически' : 'Не удалось получить баланс';
+                    subgramStatus.className = 'status-pill status-' + (data.subgram_ok ? 'ok' : 'degraded');
+                    subgramStatus.title = data.subgram_error || '';
+                }}
             }} catch (error) {{
                 // Keep the last known counters visible during a temporary DB/network error.
             }}
         }}
+        const refreshSubgramButton = document.getElementById('refresh-subgram-balance');
+        if (refreshSubgramButton) refreshSubgramButton.addEventListener('click', async () => {{
+            refreshSubgramButton.disabled = true;
+            try {{ await refreshDashboardStats(true); }} finally {{ refreshSubgramButton.disabled = false; }}
+        }});
         const dashboardEvents = new EventSource('/dashboard/events');
         dashboardEvents.addEventListener('dashboard', refreshDashboardStats);
         // EventSource automatically reconnects after a network or proxy
@@ -1304,6 +1400,7 @@ async def dashboard(request: Request):
             // Keep the current values visible while the stream reconnects.
         }};
         window.setInterval(refreshSystemHealth, 60000);
+        window.setInterval(refreshDashboardStats, 60000);
     </script>
     '''
     
