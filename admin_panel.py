@@ -805,7 +805,7 @@ BASE_HTML = '''
         .subgram-dashboard-panel .quick-link { transition: .16s ease; }
         .subgram-dashboard-panel button.quick-link { font-family: inherit; text-align: left; }
         .subgram-dashboard-panel button.quick-link:disabled { opacity: .6; cursor: wait; }
-        .subgram-stat-card { cursor: pointer; }
+        .subgram-stat-card { cursor: pointer; grid-column: 1; }
         .subgram-stat-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         .table-container { background: var(--surface); border-radius: 15px; overflow-x: auto; border: 1px solid var(--line); box-shadow: var(--card-shadow); }
         table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 13px; }
