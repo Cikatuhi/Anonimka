@@ -1,7 +1,7 @@
 import asyncio
 import asyncpg
 import json
-import time
+import time as monotonic_clock
 import uuid
 import psutil
 import re
@@ -219,12 +219,12 @@ async def get_dashboard_subgram_balance() -> dict:
     after the TTL refreshes the value once under a lock, so concurrent admins
     do not create a burst of identical SubGram API calls.
     """
-    now = time.monotonic()
+    now = monotonic_clock.monotonic()
     if now < _subgram_balance_cache["expires_at"]:
         return dict(_subgram_balance_cache)
 
     async with _subgram_balance_lock:
-        now = time.monotonic()
+        now = monotonic_clock.monotonic()
         if now < _subgram_balance_cache["expires_at"]:
             return dict(_subgram_balance_cache)
 
@@ -240,7 +240,7 @@ async def get_dashboard_subgram_balance() -> dict:
 
         _subgram_balance_cache.update(
             {
-                "expires_at": time.monotonic() + SUBGRAM_DASHBOARD_CACHE_TTL,
+                "expires_at": monotonic_clock.monotonic() + SUBGRAM_DASHBOARD_CACHE_TTL,
                 "value": value,
                 "ok": ok,
                 "error": error,
