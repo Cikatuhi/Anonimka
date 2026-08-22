@@ -1294,10 +1294,6 @@ async def dashboard(request: Request):
     <div class="page-heading">
         <div>
             <h1>Обзор</h1>
-            <p>Ключевые показатели бота и быстрый доступ к ежедневным действиям.</p>
-        </div>
-        <div class="page-actions">
-            <a class="button" href="/broadcast">Создать рассылку</a>
         </div>
     </div>
     <div class="stats">
