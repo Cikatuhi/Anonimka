@@ -829,9 +829,69 @@ async def get_all_subscriptions(limit: int = 100, offset: int = 0):
     conn = await get_conn()
     try:
         rows = await conn.fetch("""
-            SELECT s.*, u.username, u.first_name 
-            FROM subscriptions s
-            LEFT JOIN users u ON s.user_id = u.telegram_id
+            WITH webhook_candidates AS (
+                SELECT
+                    we.id,
+                    we.transaction_id,
+                    COALESCE(
+                        NULLIF(we.account_id, ''),
+                        we.payload->>'AccountId',
+                        we.payload->'Model'->>'AccountId'
+                    ) AS raw_user_id,
+                    COALESCE(
+                        we.payload->>'OperationType',
+                        we.payload->'Model'->>'OperationType',
+                        we.payload->>'EventType',
+                        we.payload->>'Type',
+                        NULLIF(we.event_type, '')
+                    ) AS raw_operation_type,
+                    COALESCE(
+                        NULLIF(we.payload->>'Amount', ''),
+                        we.payload->'Model'->>'Amount'
+                    ) AS raw_amount
+                FROM webhook_events AS we
+                WHERE LOWER(COALESCE(we.status, '')) = 'completed'
+                  AND we.transaction_id IS NOT NULL
+            ), webhook_completed AS (
+                SELECT DISTINCT ON (transaction_id)
+                    transaction_id,
+                    CASE
+                        WHEN raw_user_id ~ '^[0-9]+$' THEN raw_user_id::BIGINT
+                        ELSE NULL
+                    END AS user_id,
+                    CASE
+                        WHEN raw_amount ~ '^[0-9]+([.,][0-9]+)?$'
+                            THEN REPLACE(raw_amount, ',', '.')::NUMERIC
+                        ELSE 0::NUMERIC
+                    END AS amount_rub
+                FROM webhook_candidates
+                WHERE LOWER(COALESCE(raw_operation_type, '')) NOT LIKE '%refund%'
+                  AND LOWER(COALESCE(raw_operation_type, '')) NOT LIKE '%chargeback%'
+                  AND LOWER(COALESCE(raw_operation_type, '')) NOT LIKE '%reversal%'
+                ORDER BY transaction_id, id
+            ), successful_payments AS (
+                SELECT user_id, amount_rub
+                FROM webhook_completed
+                WHERE user_id IS NOT NULL
+                UNION ALL
+                SELECT pe.user_id, pe.amount / 100.0
+                FROM payment_events AS pe
+                WHERE LOWER(COALESCE(pe.status, '')) = 'completed'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM webhook_completed AS wc
+                      WHERE wc.transaction_id = pe.transaction_id
+                  )
+            ), payment_totals AS (
+                SELECT user_id, SUM(amount_rub) AS successful_amount
+                FROM successful_payments
+                GROUP BY user_id
+            )
+            SELECT s.*, u.username, u.first_name,
+                   COALESCE(pt.successful_amount, 0)::NUMERIC AS successful_amount
+            FROM subscriptions AS s
+            LEFT JOIN users AS u ON s.user_id = u.telegram_id
+            LEFT JOIN payment_totals AS pt ON pt.user_id = s.user_id
             ORDER BY s.created_at DESC
             LIMIT $1 OFFSET $2
         """, limit, offset)

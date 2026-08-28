@@ -488,6 +488,7 @@ async def ensure_admin_indexes() -> None:
         "CREATE INDEX IF NOT EXISTS idx_subscriptions_user_created_at ON subscriptions (user_id, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_payment_events_status_created_at ON payment_events (status, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_payment_events_user_created_at ON payment_events (user_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_webhook_events_status_transaction_id ON webhook_events (status, transaction_id)",
         "CREATE INDEX IF NOT EXISTS idx_payment_link_visits_last_visited_at ON payment_link_visits (last_visited_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_status_created_at ON broadcast_jobs (status, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_blocked_users_blocked_at ON blocked_users (blocked_at DESC)",
@@ -1656,6 +1657,7 @@ async def subscriptions_page(request: Request):
                     <th>План</th>
                     <th>Начало</th>
                     <th>Окончание</th>
+                    <th>Успешно списано</th>
                     <th>Статус</th>
                     <th>Действие</th>
                 </tr>
@@ -1663,6 +1665,11 @@ async def subscriptions_page(request: Request):
         for row in rows:
             raw_status, _, _ = subscription_status_meta(row.get('status'))
             end_date_str = format_admin_datetime(row['end_date'], date_only=True, fallback='∞')
+            successful_amount = row.get('successful_amount') or 0
+            try:
+                successful_amount_text = f"{float(successful_amount):,.2f}".replace(',', ' ').replace('.', ',') + ' ₽'
+            except (TypeError, ValueError):
+                successful_amount_text = '0,00 ₽'
 
             block_btn = ''
             if raw_status in ['active', 'pending']:
@@ -1680,6 +1687,7 @@ async def subscriptions_page(request: Request):
                 <td>{escape(str(row.get('plan') or '-'))}</td>
                 <td>{format_admin_datetime(row['start_date'], date_only=True)}</td>
                 <td>{end_date_str}</td>
+                <td><strong>{successful_amount_text}</strong></td>
                 <td>{subscription_status_badge(raw_status)}</td>
                 <td>{block_btn}</td>
             </tr>
