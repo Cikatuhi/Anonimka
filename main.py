@@ -47,6 +47,8 @@ async def lifespan(app: FastAPI):
     try:
         await database.ensure_message_retention_schema(conn)
         await database.ensure_webhook_events_schema(conn)
+        await database.ensure_payment_events_schema(conn)
+        await database.ensure_payment_events_user_fk_protection(conn)
         await conn.execute("""
             ALTER TABLE subscriptions
             ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE
@@ -56,24 +58,6 @@ async def lifespan(app: FastAPI):
             ON subscriptions(next_retry_at)
         """)
         await database.ensure_subscription_user_fk_protection(conn)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS payment_events (
-                id SERIAL PRIMARY KEY,
-                transaction_id TEXT UNIQUE NOT NULL,
-                user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
-                amount INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_payment_events_user_id
-            ON payment_events(user_id)
-        """)
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_payment_events_created_at
-            ON payment_events(created_at DESC)
-        """)
         logger.info("✅ retry_low/payment_events migrations checked")
     finally:
         await database.release_conn(conn)

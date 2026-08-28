@@ -247,6 +247,10 @@ async def ensure_admin_dashboard_notifications(conn):
         "unsubscribed_users": "INSERT OR DELETE",
         "messages": "INSERT OR DELETE",
         "payment_link_visits": "INSERT OR DELETE",
+        # Successful payment totals are built from both webhook journal rows
+        # and the recurrent-payment ledger.  Both tables are append-only.
+        "webhook_events": "INSERT",
+        "payment_events": "INSERT",
         # The active-subscription count changes when status or end_date does.
         "subscriptions": "INSERT OR UPDATE OF status, end_date OR DELETE",
     }
@@ -351,6 +355,22 @@ async def ensure_webhook_events_schema(conn):
     webhook endpoint acknowledged.
     """
     await conn.execute("""
+        CREATE OR REPLACE FUNCTION anonimno_try_parse_jsonb(value TEXT)
+        RETURNS JSONB
+        LANGUAGE plpgsql
+        IMMUTABLE
+        AS $$
+        BEGIN
+            IF value IS NULL OR btrim(value) = '' THEN
+                RETURN '{}'::jsonb;
+            END IF;
+            RETURN value::jsonb;
+        EXCEPTION WHEN OTHERS THEN
+            RETURN '{}'::jsonb;
+        END;
+        $$
+    """)
+    await conn.execute("""
         CREATE TABLE IF NOT EXISTS webhook_events (
             id BIGSERIAL PRIMARY KEY,
             received_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -370,6 +390,74 @@ async def ensure_webhook_events_schema(conn):
         CREATE INDEX IF NOT EXISTS idx_webhook_events_transaction_id
         ON webhook_events (transaction_id)
     """)
+
+
+async def ensure_payment_events_schema(conn):
+    """Create the recurrent-payment ledger used by subscriptions and reports.
+
+    The payment service and the admin panel can start independently. Keep this
+    migration in one shared helper so the dashboard query never runs before
+    its ledger table exists.
+    """
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS payment_events (
+            id SERIAL PRIMARY KEY,
+            transaction_id TEXT UNIQUE NOT NULL,
+            user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+            amount INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_payment_events_user_id
+        ON payment_events(user_id)
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_payment_events_created_at
+        ON payment_events(created_at DESC)
+    """)
+
+
+async def ensure_payment_events_user_fk_protection(conn):
+    """Keep recurrent payment history when a user record is removed.
+
+    Older installations may have created ``payment_events.user_id`` with
+    ``ON DELETE CASCADE``. Payment events are accounting history, so deleting
+    a user must not silently erase them or change the dashboard total.
+    """
+    async with conn.transaction():
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext('anonimno.payment-events-user-fk'))"
+        )
+        constraints = await conn.fetch(
+            """
+            SELECT conname, confdeltype
+            FROM pg_constraint
+            WHERE contype = 'f'
+              AND conrelid = to_regclass('payment_events')
+              AND confrelid = to_regclass('users')
+            """
+        )
+
+        # ``r`` is RESTRICT and ``a`` is NO ACTION; both prevent a parent
+        # delete from removing the payment history.
+        if constraints and all(row["confdeltype"] in ("r", "a") for row in constraints):
+            return
+
+        for row in constraints:
+            await conn.execute(
+                f"ALTER TABLE payment_events DROP CONSTRAINT IF EXISTS {_quote_identifier(row['conname'])}"
+            )
+
+        await conn.execute(
+            """
+            ALTER TABLE payment_events
+            ADD CONSTRAINT payment_events_user_id_users_fkey_protected
+            FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE RESTRICT
+            NOT VALID
+            """
+        )
 
 
 async def record_webhook_event(
@@ -485,27 +573,11 @@ async def _ensure_core_schema(conn):
     )
     await ensure_subscription_user_fk_protection(conn)
     await ensure_webhook_events_schema(conn)
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS payment_events (
-            id SERIAL PRIMARY KEY,
-            transaction_id TEXT UNIQUE NOT NULL,
-            user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
-            amount INTEGER NOT NULL,
-            status TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+    await ensure_payment_events_schema(conn)
+    await ensure_payment_events_user_fk_protection(conn)
     await conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_subscriptions_next_retry_at
         ON subscriptions(next_retry_at)
-    """)
-    await conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_payment_events_user_id
-        ON payment_events(user_id)
-    """)
-    await conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_payment_events_created_at
-        ON payment_events(created_at DESC)
     """)
 
 
@@ -831,27 +903,38 @@ async def get_all_subscriptions(limit: int = 100, offset: int = 0):
         rows = await conn.fetch("""
             WITH webhook_candidates AS (
                 SELECT
-                    we.id,
-                    we.transaction_id,
+                    wp.id,
+                    wp.transaction_id,
                     COALESCE(
-                        NULLIF(we.account_id, ''),
-                        we.payload->>'AccountId',
-                        we.payload->'Model'->>'AccountId'
+                        NULLIF(wp.account_id, ''),
+                        wp.payload->>'AccountId',
+                        wp.model_payload->>'AccountId'
                     ) AS raw_user_id,
                     COALESCE(
-                        we.payload->>'OperationType',
-                        we.payload->'Model'->>'OperationType',
-                        we.payload->>'EventType',
-                        we.payload->>'Type',
-                        NULLIF(we.event_type, '')
+                        wp.payload->>'OperationType',
+                        wp.model_payload->>'OperationType',
+                        wp.payload->>'EventType',
+                        wp.payload->>'Type',
+                        NULLIF(wp.event_type, '')
                     ) AS raw_operation_type,
                     COALESCE(
-                        NULLIF(we.payload->>'Amount', ''),
-                        we.payload->'Model'->>'Amount'
+                        NULLIF(wp.payload->>'Amount', ''),
+                        wp.model_payload->>'Amount'
                     ) AS raw_amount
-                FROM webhook_events AS we
-                WHERE LOWER(COALESCE(we.status, '')) = 'completed'
-                  AND we.transaction_id IS NOT NULL
+                FROM (
+                    SELECT
+                        we.*,
+                        CASE
+                            WHEN jsonb_typeof(we.payload->'Model') = 'object'
+                                THEN we.payload->'Model'
+                            WHEN jsonb_typeof(we.payload->'Model') = 'string'
+                                THEN anonimno_try_parse_jsonb(we.payload->>'Model')
+                            ELSE '{}'::JSONB
+                        END AS model_payload
+                    FROM webhook_events AS we
+                ) AS wp
+                WHERE LOWER(COALESCE(wp.status, '')) = 'completed'
+                  AND NULLIF(wp.transaction_id, '') IS NOT NULL
             ), webhook_completed AS (
                 SELECT DISTINCT ON (transaction_id)
                     transaction_id,

@@ -6,6 +6,7 @@ import uuid
 import psutil
 import re
 import aiohttp
+from decimal import Decimal, InvalidOperation
 from html import escape
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -212,6 +213,17 @@ def format_subgram_balance(value) -> str:
     return f"{amount:,.2f}".replace(",", " ").replace(".", ",")
 
 
+def format_dashboard_amount(value) -> str:
+    """Format a monetary dashboard value without exposing provider decimals."""
+    if value is None:
+        return "—"
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return "—"
+    return f"{amount:,.2f}".replace(",", " ").replace(".", ",")
+
+
 async def get_dashboard_subgram_balance() -> dict:
     """Return a cached SubGram balance snapshot for the dashboard.
 
@@ -328,6 +340,73 @@ payment_visitors_hourly AS (
     FROM payment_link_visits
     WHERE first_visited_at >= $1 AND first_visited_at <= $2
     GROUP BY 1
+),
+webhook_candidates AS (
+    SELECT
+        wp.id,
+        wp.transaction_id,
+        COALESCE(
+            NULLIF(wp.account_id, ''),
+            wp.payload->>'AccountId',
+            wp.model_payload->>'AccountId'
+        ) AS raw_user_id,
+        COALESCE(
+            wp.payload->>'OperationType',
+            wp.model_payload->>'OperationType',
+            wp.payload->>'EventType',
+            wp.payload->>'Type',
+            NULLIF(wp.event_type, '')
+        ) AS raw_operation_type,
+        COALESCE(
+            NULLIF(wp.payload->>'Amount', ''),
+            wp.model_payload->>'Amount'
+        ) AS raw_amount
+    FROM (
+        SELECT
+            we.*,
+            CASE
+                WHEN jsonb_typeof(we.payload->'Model') = 'object'
+                    THEN we.payload->'Model'
+                WHEN jsonb_typeof(we.payload->'Model') = 'string'
+                    THEN anonimno_try_parse_jsonb(we.payload->>'Model')
+                ELSE '{}'::JSONB
+            END AS model_payload
+        FROM webhook_events AS we
+    ) AS wp
+    WHERE LOWER(COALESCE(wp.status, '')) = 'completed'
+      AND NULLIF(wp.transaction_id, '') IS NOT NULL
+),
+webhook_completed AS (
+    SELECT DISTINCT ON (transaction_id)
+        transaction_id,
+        CASE
+            WHEN raw_user_id ~ '^[0-9]+$' THEN raw_user_id::BIGINT
+            ELSE NULL
+        END AS user_id,
+        CASE
+            WHEN raw_amount ~ '^[0-9]+([.,][0-9]+)?$'
+                THEN REPLACE(raw_amount, ',', '.')::NUMERIC
+            ELSE 0::NUMERIC
+        END AS amount_rub
+    FROM webhook_candidates
+    WHERE LOWER(COALESCE(raw_operation_type, '')) NOT LIKE '%refund%'
+      AND LOWER(COALESCE(raw_operation_type, '')) NOT LIKE '%chargeback%'
+      AND LOWER(COALESCE(raw_operation_type, '')) NOT LIKE '%reversal%'
+    ORDER BY transaction_id, id
+),
+successful_payments AS (
+    SELECT user_id, amount_rub
+    FROM webhook_completed
+    WHERE user_id IS NOT NULL
+    UNION ALL
+    SELECT pe.user_id, pe.amount / 100.0
+    FROM payment_events AS pe
+    WHERE LOWER(COALESCE(pe.status, '')) = 'completed'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM webhook_completed AS wc
+          WHERE wc.transaction_id = pe.transaction_id
+      )
 )
 SELECT
     (
@@ -358,6 +437,7 @@ SELECT
         )
     ) AS total_subscriptions,
     (SELECT COUNT(*) FROM payment_link_visits) AS payment_visitors,
+    (SELECT COALESCE(SUM(amount_rub), 0)::NUMERIC FROM successful_payments) AS total_successful_amount,
     (
         SELECT COUNT(*)
         FROM users
@@ -516,6 +596,8 @@ async def lifespan(app: FastAPI):
     conn = await database.get_conn()
     try:
         await database.ensure_webhook_events_schema(conn)
+        await database.ensure_payment_events_schema(conn)
+        await database.ensure_payment_events_user_fk_protection(conn)
         await database.ensure_admin_dashboard_notifications(conn)
     finally:
         await database.release_conn(conn)
@@ -786,7 +868,7 @@ BASE_HTML = '''
         :root[data-theme="dark"] .stat-card { background: linear-gradient(145deg, var(--surface) 0%, var(--card-tint, transparent) 100%); }
         :root[data-theme="dark"] .stat-card .icon { background: var(--card-accent-soft, var(--accent-soft)); color: var(--card-accent, var(--accent-dark)); }
         :root[data-theme="dark"] .stat-card:hover { border-color: color-mix(in srgb, var(--card-accent, var(--accent)) 48%, var(--line)); }
-        .quick-grid { display: grid; grid-template-columns: 1.35fr .65fr; gap: 14px; align-items: start; }
+        .quick-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(280px, .95fr); gap: 14px; align-items: start; }
         .system-status-grid { display: grid; gap: 9px; margin-top: 18px; }
         .system-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-soft); font-size: 13px; }
         .status-pill { display: inline-flex; align-items: center; gap: 6px; font-weight: 750; font-size: 12px; }
@@ -806,7 +888,9 @@ BASE_HTML = '''
         .subgram-dashboard-panel .quick-link { transition: .16s ease; }
         .subgram-dashboard-panel button.quick-link { font-family: inherit; text-align: left; }
         .subgram-dashboard-panel button.quick-link:disabled { opacity: .6; cursor: wait; }
-        .subgram-stat-card { cursor: pointer; grid-column: 1; }
+        .subgram-stat-card { cursor: pointer; }
+        .charges-stat-card { --card-accent: #5da3ff; --card-accent-soft: rgba(72, 142, 255, .14); --card-tint: rgba(31, 78, 147, .12); }
+        .quick-grid > .panel { grid-column: 3; }
         .subgram-stat-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         .table-container { background: var(--surface); border-radius: 15px; overflow-x: auto; border: 1px solid var(--line); box-shadow: var(--card-shadow); }
         table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 13px; }
@@ -873,6 +957,8 @@ BASE_HTML = '''
             .mobile-menu-button { display: inline-flex; align-items: center; justify-content: center; }
             .topbar { height: 68px; padding: 0 20px; }
             .container { padding: 24px 20px 42px; }
+            .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .quick-grid > .panel { grid-column: 1 / -1; }
         }
         @media (max-width: 700px) {
             .page-heading { flex-direction: column; }
@@ -882,6 +968,7 @@ BASE_HTML = '''
             .stat-number { font-size: 24px; }
             .stat-card .icon { margin-bottom: 12px; }
             .quick-grid { grid-template-columns: 1fr; }
+            .quick-grid > .panel { grid-column: auto; grid-row: auto; }
             .result-stats { grid-template-columns: repeat(2, 1fr); }
             .form-container, .result-box, .panel { padding: 17px; }
             .detail-grid { grid-template-columns: 1fr; }
@@ -1172,6 +1259,7 @@ async def dashboard_data(request: Request):
                 "subscriptions_today": int(stats["subscriptions_today"] or 0),
                 "payment_visitors": int(stats["payment_visitors"] or 0),
                 "payment_visitors_today": int(stats["payment_visitors_today"] or 0),
+                "total_successful_amount": format_dashboard_amount(stats["total_successful_amount"]),
                 "users_today_chart": list(stats["users_today_chart"] or []),
                 "subscriptions_today_chart": list(stats["subscriptions_today_chart"] or []),
                 "messages_today_chart": list(stats["messages_today_chart"] or []),
@@ -1241,6 +1329,7 @@ async def dashboard(request: Request):
     subscriptions_today = 0
     payment_visitors = 0
     payment_visitors_today = 0
+    total_successful_amount = 0
     users_today_chart = []
     subscriptions_today_chart = []
     messages_today_chart = []
@@ -1268,6 +1357,7 @@ async def dashboard(request: Request):
             subscriptions_today = stats["subscriptions_today"]
             payment_visitors = stats["payment_visitors"]
             payment_visitors_today = stats["payment_visitors_today"]
+            total_successful_amount = stats["total_successful_amount"] or 0
             users_today_chart = list(stats["users_today_chart"] or [])
             subscriptions_today_chart = list(stats["subscriptions_today_chart"] or [])
             messages_today_chart = list(stats["messages_today_chart"] or [])
@@ -1287,6 +1377,7 @@ async def dashboard(request: Request):
     worker_status = "ok" if worker_alive else "degraded"
     worker_label = "Работает" if worker_alive else "Нет свежего сигнала"
     subgram_balance = format_subgram_balance(subgram_snapshot.get("value"))
+    total_successful_amount_text = format_dashboard_amount(total_successful_amount)
     subgram_status_class = "ok" if subgram_snapshot.get("ok") else "degraded"
     subgram_status = (
         "Обновляется автоматически"
@@ -1307,6 +1398,7 @@ async def dashboard(request: Request):
     </div>
     <div class="quick-grid">
         <div class="stat-card subgram-stat-card" role="button" tabindex="0" id="refresh-subgram-balance"><span class="icon">₽</span><div class="stat-number" id="dashboard-subgram-balance">{subgram_balance} ₽</div><div class="stat-label">Баланс SubGram</div></div>
+        <div class="stat-card charges-stat-card"><span class="icon">↗</span><div class="stat-number" id="dashboard-total-successful-amount">{total_successful_amount_text} ₽</div><div class="stat-label">Общие списания</div></div>
         <section class="panel">
             <div class="panel-title">Состояние системы</div>
             <p class="panel-copy">Проверяется автоматически при открытии и обновляется раз в минуту.</p>
@@ -1370,6 +1462,8 @@ async def dashboard(request: Request):
                 document.getElementById('dashboard-payment-visitors').textContent = data.payment_visitors.toLocaleString('ru-RU');
                 document.getElementById('dashboard-payment-visitors-today').textContent = '+' + data.payment_visitors_today.toLocaleString('ru-RU') + ' за сегодня';
                 updateChart('dashboard-payment-visitors-chart', data.payment_visitors_today_chart);
+                const totalSuccessfulAmount = document.getElementById('dashboard-total-successful-amount');
+                if (totalSuccessfulAmount) totalSuccessfulAmount.textContent = (data.total_successful_amount || '—') + ' ₽';
                 const worker = document.getElementById('worker-health');
                 worker.textContent = data.worker_alive ? 'Работает' : 'Нет свежего сигнала';
                 worker.className = 'status-pill status-' + (data.worker_alive ? 'ok' : 'degraded');
