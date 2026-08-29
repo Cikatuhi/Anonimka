@@ -22,9 +22,7 @@ import database
 load_dotenv()
 
 ADMINS = {
-    "Alkatras": "147258369",
     "cikatuh": "1324576890",
-    "glavskamer": "AK113689avip$top",
 }
 
 
