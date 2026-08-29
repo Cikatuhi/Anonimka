@@ -28,7 +28,7 @@ ADMIN_BIND_HOST = os.getenv("ADMIN_BIND_HOST", "127.0.0.1").strip() or "127.0.0.
 ADMIN_PORT = int(os.getenv("ADMIN_PORT", "8000"))
 
 ADMINS = {
-    "cikatuh": "1324576890",
+    "cikatuh": "2509",
 }
 
 
