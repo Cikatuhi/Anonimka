@@ -1,6 +1,7 @@
 import asyncio
 import asyncpg
 import json
+import os
 import time as monotonic_clock
 import uuid
 import psutil
@@ -13,13 +14,18 @@ from zoneinfo import ZoneInfo
 from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response, StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from cloudpayments import CloudPaymentsClient
 from time_utils import now_msk
 import database
 
 load_dotenv()
+
+# The admin panel is private infrastructure. Bind it to loopback by default;
+# expose it publicly only through an explicitly configured, authenticated
+# reverse proxy or an SSH tunnel.
+ADMIN_BIND_HOST = os.getenv("ADMIN_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1"
+ADMIN_PORT = int(os.getenv("ADMIN_PORT", "8000"))
 
 ADMINS = {
     "cikatuh": "1324576890",
@@ -611,14 +617,6 @@ async def lifespan(app: FastAPI):
         print("🛑 Соединения с БД закрыты", flush=True)
 app = FastAPI(title="Admin Panel для Telegram Бота", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 FAVICON_SVG = '''
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Anonimno">
   <rect x="3" y="3" width="58" height="58" rx="17" fill="#1fb89f"/>
@@ -1089,7 +1087,7 @@ sessions = {}
 
 async def auth_middleware(request: Request, call_next):
     if request.url.path in {
-        "/admin/login", "/health", "/favicon.svg", "/favicon.ico",
+        "/admin/login", "/favicon.svg", "/favicon.ico",
         "/admin-favicon-mail.svg", "/admin-favicon-mail.ico",
     }:
         return await call_next(request)
@@ -1151,7 +1149,9 @@ async def login(request: Request):
         value=token,
         httponly=True,
         max_age=86400,
-        secure=True,
+        # SSH tunnels commonly expose the local endpoint over HTTP. Keep the
+        # cookie Secure when the panel is behind HTTPS, but allow the tunnel.
+        secure=request.url.scheme == "https",
         samesite="lax"
     )
     return response
@@ -3273,4 +3273,4 @@ async def payments_page(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=ADMIN_BIND_HOST, port=ADMIN_PORT)

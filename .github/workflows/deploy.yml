@@ -62,6 +62,7 @@ jobs:
           cd "$PROD_PATH"
           git pull --ff-only origin main
           test "$(git rev-parse HEAD)" = "$DEPLOY_SHA"
+          sudo -n systemctl daemon-reload
           sudo -n systemctl restart webhook-handler.service
           sudo -n systemctl restart worker.service
           sudo -n systemctl restart admin-panel.service

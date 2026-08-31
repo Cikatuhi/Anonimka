@@ -1,12 +1,8 @@
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
-from fastapi.middleware.cors import CORSMiddleware
-from time_utils import now_msk
-import httpx
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, Response
 import os
 import sys
 import json
-from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 
 sys.path.append('/root/Anonimno-Artem-')
@@ -20,10 +16,6 @@ CLOUDPAYMENTS_PUBLIC_ID = os.getenv(
     "CLOUDPAYMENTS_PUBLIC_ID",
     "pk_cfc9c99ee447f06de34f6cd148a22",
 )
-
-cors_origins = {SITE_URL, "http://localhost:8000"}
-if SITE_URL.startswith("https://"):
-    cors_origins.add("http://" + SITE_URL.removeprefix("https://"))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,15 +36,6 @@ PAYMENT_FAVICON_SVG = '''
 </svg>
 '''
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=sorted(cors_origins),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
 @app.get("/favicon.svg", include_in_schema=False)
 @app.get("/favicon.ico", include_in_schema=False)
 @app.get("/pay/favicon.svg", include_in_schema=False)
@@ -67,9 +50,6 @@ async def payment_favicon():
 
 
 
-# Используем словарь для кеша
-settings_cache = {}
-
 async def get_show_checkboxes() -> bool:
     try:
         value = await database.get_setting('show_payment_checkboxes', 'true')
@@ -78,37 +58,6 @@ async def get_show_checkboxes() -> bool:
         print(f"❌ Ошибка получения настройки: {e}")
         return True
 
-@app.post("/api/settings/update")
-async def update_setting(request: Request):
-    try:
-        body = await request.json()
-        key = body.get('key')
-        value = body.get('value')
-        
-        if not key:
-            return JSONResponse(content={"success": False, "error": "Missing key"}, status_code=400)
-        
-        # Обновляем кеш и БД
-        settings_cache[key] = value
-        await database.set_setting(key, value)
-        
-        return JSONResponse(content={"success": True, "message": "Setting updated"})
-    except Exception as e:
-        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
-
-@app.get("/api/settings/{key}")
-async def get_setting(key: str):
-    try:
-        # Сначала проверяем кеш
-        if key in settings_cache:
-            value = settings_cache[key]
-        else:
-            value = await database.get_setting(key, 'true')
-            settings_cache[key] = value
-        return JSONResponse(content={"key": key, "value": value})
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-    
 @app.get("/", response_class=HTMLResponse)
 async def main_page():
     return HTMLResponse(content="""

@@ -6,6 +6,8 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/Anonimno-Artem-
+Environment="ADMIN_BIND_HOST=127.0.0.1"
+Environment="ADMIN_PORT=8000"
 ExecStart=/root/Anonimno-Artem-/venv/bin/python /root/Anonimno-Artem-/admin_panel.py
 Restart=always
 RestartSec=10
