@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 import asyncio
 import ssl
+from time import monotonic
 from contextlib import asynccontextmanager
 import aiohttp
 from time_utils import to_db_timestamp
@@ -33,11 +34,16 @@ pool = None
 _pool_lock = asyncio.Lock()
 _subgram_session = None
 _subgram_session_lock = asyncio.Lock()
+_subgram_check_cache: dict[tuple[int, int], tuple[float, dict]] = {}
+_subgram_check_inflight: dict[tuple[int, int], asyncio.Task] = {}
+_subgram_check_lock = asyncio.Lock()
 SCHEMA_MIGRATION_LOCK = "anonimno.schema-migrations"
 
 # Keep the existing 10-second upper bound while failing stalled connections
 # earlier; a shared session handles the common case without a new TCP setup.
 SUBGRAM_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=2, sock_read=8)
+SUBGRAM_CHECK_CACHE_TTL = 5.0
+SUBGRAM_CHECK_ERROR_CACHE_TTL = 2.0
 
 
 @asynccontextmanager
@@ -1538,50 +1544,100 @@ async def close_http_session():
     if _subgram_session is not None and not _subgram_session.closed:
         await _subgram_session.close()
     _subgram_session = None
+    _subgram_check_cache.clear()
+    _subgram_check_inflight.clear()
 
 
-async def check_subgram(user_id: int, chat_id: int) -> dict:
-    """
-    Проверяет подписку пользователя через SubGram.
-    Возвращает:
-        - status: 'ok' — можно пропустить
-        - status: 'warning' — нужна подписка
-        - status: 'error' — ошибка, пропустить
-    """
+async def _fetch_subgram_check(user_id: int, chat_id: int) -> dict:
+    """Perform one SubGram request without logging the provider payload."""
     if not SUBGRAM_API_KEY:
-        print("⚠️ SUBGRAM_API_KEY не настроен. Пропускаем проверку.")
+        logging.warning("SUBGRAM_API_KEY не настроен. Проверка пропущена.")
         return {"status": "ok", "message": "SubGram не настроен"}
-    
+
     url = "https://api.subgram.org/get-sponsors"
     headers = {
         "Auth": SUBGRAM_API_KEY,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
-    payload = {
-        "user_id": user_id,
-        "chat_id": chat_id
-    }
-    
+    payload = {"user_id": user_id, "chat_id": chat_id}
+
     try:
         session = await _get_subgram_session()
-        async with session.post(url, headers=headers, json=payload, timeout=SUBGRAM_TIMEOUT) as response:
-                response_text = await response.text()
-                if response.status == 200:
-                    try:
-                        data = json.loads(response_text)
-                    except json.JSONDecodeError:
-                        logging.error("SubGram вернул некорректный JSON: HTTP %s", response.status)
-                        return {"status": "error", "message": "Некорректный ответ SubGram"}
-                    print(f"🔍 SubGram ответ для {user_id}: {data}")
-                    return data
-                else:
-                    # Текст ответа содержит причину (например, неверный тип ключа),
-                    # но никогда не логируем сам Auth-заголовок.
-                    print(f"❌ SubGram ошибка: HTTP {response.status}: {response_text[:500]}")
-                    return {"status": "error", "message": f"HTTP {response.status}: {response_text[:300]}"}
-    except Exception as e:
-        print(f"❌ SubGram исключение: {e}")
-        return {"status": "error", "message": str(e)}
+        async with session.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=SUBGRAM_TIMEOUT,
+        ) as response:
+            response_text = await response.text()
+            if response.status == 200:
+                try:
+                    return json.loads(response_text)
+                except json.JSONDecodeError:
+                    logging.error("SubGram вернул некорректный JSON: HTTP %s", response.status)
+                    return {"status": "error", "message": "Некорректный ответ SubGram"}
+
+            logging.warning("SubGram вернул HTTP %s для проверки пользователя %s", response.status, user_id)
+            return {"status": "error", "message": f"HTTP {response.status}: {response_text[:300]}"}
+    except Exception as exc:
+        logging.warning("SubGram недоступен для проверки пользователя %s: %s", user_id, exc)
+        return {"status": "error", "message": str(exc)}
+
+
+async def _fetch_and_cache_subgram_check(key: tuple[int, int]) -> dict:
+    """Share one in-flight request and cache its short-lived result."""
+    result = await _fetch_subgram_check(*key)
+    status = result.get("status")
+    # A user may complete a sponsor task immediately after a warning.  Do not
+    # cache that negative answer; concurrent checks are already coalesced by
+    # the in-flight task above.  A successful result and a short-lived error
+    # are safe to reuse for their respective small windows.
+    if status == "ok":
+        ttl = SUBGRAM_CHECK_CACHE_TTL
+    elif status == "warning":
+        ttl = 0
+    else:
+        ttl = SUBGRAM_CHECK_ERROR_CACHE_TTL
+    async with _subgram_check_lock:
+        now = monotonic()
+        if ttl:
+            _subgram_check_cache[key] = (now + ttl, dict(result))
+        # A bot with many unique users must not turn this optimization into
+        # another unbounded in-memory dictionary.
+        if len(_subgram_check_cache) > 2048:
+            for cached_key, (expires_at, _value) in list(_subgram_check_cache.items()):
+                if expires_at <= now:
+                    _subgram_check_cache.pop(cached_key, None)
+    return result
+
+
+async def check_subgram(user_id: int, chat_id: int) -> dict:
+    """Check a user's SubGram status with a short per-user cache."""
+    key = (int(user_id), int(chat_id))
+    now = monotonic()
+    async with _subgram_check_lock:
+        cached = _subgram_check_cache.get(key)
+        if cached and cached[0] > now:
+            return dict(cached[1])
+
+        task = _subgram_check_inflight.get(key)
+        if task is None:
+            task = asyncio.create_task(
+                _fetch_and_cache_subgram_check(key),
+                name=f"subgram-check-{key[0]}",
+            )
+            _subgram_check_inflight[key] = task
+
+    try:
+        # A cancelled Telegram update should not cancel the shared request for
+        # another concurrent update from the same user.
+        result = await asyncio.shield(task)
+        return dict(result)
+    finally:
+        if task.done():
+            async with _subgram_check_lock:
+                if _subgram_check_inflight.get(key) is task:
+                    _subgram_check_inflight.pop(key, None)
 
 
 

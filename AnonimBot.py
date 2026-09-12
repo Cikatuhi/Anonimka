@@ -13,10 +13,122 @@ TOKEN = os.getenv("BOT_TOKEN")
 SITE_URL = os.getenv("SITE_URL", "https://secretky.ru").rstrip("/")
 
 logging.basicConfig(level=logging.INFO)
+# Telegram's HTTP client logs every long-poll request at INFO.  Keep the
+# application's own operational messages, but avoid writing one log line per
+# getUpdates request and its URL.
+for _logger_name in ("httpx", "httpcore", "telegram.ext.Updater", "telegram.ext.Application"):
+    logging.getLogger(_logger_name).setLevel(logging.WARNING)
 
 active_sessions = {}
 reply_sessions = {}
 MAX_SESSIONS = 1000
+SESSION_TTL_SECONDS = 15 * 60
+SESSION_CLEANUP_INTERVAL_SECONDS = 60
+reply_session_created_at = {}
+
+
+def _session_now() -> float:
+    """Return the monotonic clock used for in-memory session expiry."""
+    return asyncio.get_running_loop().time()
+
+
+def _purge_expired_sessions(now: float | None = None) -> None:
+    """Remove abandoned sessions and enforce the in-memory size limit."""
+    now = _session_now() if now is None else now
+    cutoff = now - SESSION_TTL_SECONDS
+
+    for user_id, session in list(active_sessions.items()):
+        created_at = float(session.get("created_at", now))
+        if created_at <= cutoff:
+            active_sessions.pop(user_id, None)
+
+    for user_id in list(reply_sessions):
+        created_at = float(reply_session_created_at.get(user_id, now))
+        if created_at <= cutoff:
+            reply_sessions.pop(user_id, None)
+            reply_session_created_at.pop(user_id, None)
+
+    # MAX_SESSIONS is a hard safety cap, not just a documentation constant.
+    # Evict the oldest pending interaction if an unusual burst exceeds it.
+    for sessions, timestamps in (
+        (active_sessions, None),
+        (reply_sessions, reply_session_created_at),
+    ):
+        while len(sessions) > MAX_SESSIONS:
+            oldest_user = min(
+                sessions,
+                key=lambda user_id: float(
+                    (sessions[user_id].get("created_at", now) if timestamps is None
+                     else timestamps.get(user_id, now))
+                ),
+            )
+            sessions.pop(oldest_user, None)
+            if timestamps is not None:
+                timestamps.pop(oldest_user, None)
+
+
+def _remember_active_session(user_id: int, recipient_id: int, recipient_name: str) -> None:
+    """Store a bounded, expiring anonymous-message session."""
+    now = _session_now()
+    _purge_expired_sessions(now)
+    if user_id not in active_sessions and len(active_sessions) >= MAX_SESSIONS:
+        oldest_user = min(
+            active_sessions,
+            key=lambda item: float(active_sessions[item].get("created_at", now)),
+        )
+        active_sessions.pop(oldest_user, None)
+    active_sessions[user_id] = {
+        "recipient_id": recipient_id,
+        "recipient_name": recipient_name,
+        "created_at": now,
+    }
+
+
+def _remember_reply_session(user_id: int, original_sender_id: int) -> None:
+    """Store a bounded, expiring reply session."""
+    now = _session_now()
+    _purge_expired_sessions(now)
+    if user_id not in reply_sessions and len(reply_sessions) >= MAX_SESSIONS:
+        oldest_user = min(
+            reply_sessions,
+            key=lambda item: float(reply_session_created_at.get(item, now)),
+        )
+        reply_sessions.pop(oldest_user, None)
+        reply_session_created_at.pop(oldest_user, None)
+    reply_sessions[user_id] = original_sender_id
+    reply_session_created_at[user_id] = now
+
+
+def _drop_reply_session(user_id: int) -> None:
+    reply_sessions.pop(user_id, None)
+    reply_session_created_at.pop(user_id, None)
+
+
+async def _session_cleanup_loop() -> None:
+    """Periodically clear abandoned interactions without waiting for traffic."""
+    try:
+        while True:
+            await asyncio.sleep(SESSION_CLEANUP_INTERVAL_SECONDS)
+            _purge_expired_sessions()
+    except asyncio.CancelledError:
+        return
+
+
+async def _application_post_init(application) -> None:
+    application.bot_data["session_cleanup_task"] = asyncio.create_task(
+        _session_cleanup_loop(),
+        name="bot-session-cleanup",
+    )
+
+
+async def _application_post_shutdown(application) -> None:
+    task = application.bot_data.pop("session_cleanup_task", None)
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "7683869901"))
 VALENTINE_CUSTOM_EMOJI_ID = "5472019095106886003"
@@ -90,6 +202,7 @@ async def send_welcome_sticker(message) -> None:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _purge_expired_sessions()
     user = update.effective_user
     user_id = user.id
     username = user.username or "без_юзернейма"
@@ -105,20 +218,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_welcome_sticker(update.message)
 
     args = context.args
+    recipient_id = None
     if args:
-        recipient_id = int(args[0])
-        if recipient_id != user_id:
+        try:
+            recipient_id = int(args[0])
+        except (TypeError, ValueError):
+            logging.warning("Ignoring malformed /start deep-link argument: %r", args[0])
+
+        if recipient_id is not None and recipient_id != user_id:
             recipient_data = await database.get_user(recipient_id)
             if recipient_data:
                 recipient_name = recipient_data['first_name']
             else:
                 recipient_name = "этого человека"
 
-            active_sessions[user_id] = {
-                'recipient_id': recipient_id,
-                'recipient_name': recipient_name,
-                'created_at': asyncio.get_event_loop().time()
-            }
+            _remember_active_session(user_id, recipient_id, recipient_name)
 
             keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -145,6 +259,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _purge_expired_sessions()
     user = update.effective_user
     # Telegram can deliver channel/service updates without an effective user.
     # They must not crash the message handler (and should not affect sessions).
@@ -158,6 +273,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user_id in reply_sessions:
         original_sender_id = reply_sessions.pop(user_id)
+        reply_session_created_at.pop(user_id, None)
         try:
             reply_keyboard = [
                 [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
@@ -445,18 +561,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def send_again_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
 
-    data = query.data.split("_")
-    recipient_id = int(data[2])
-    recipient_name = data[3]
+    parts = (query.data or "").split("_", 3)
+    if len(parts) < 4:
+        await query.answer("Кнопка устарела. Откройте сообщение ещё раз.", show_alert=True)
+        return
+    try:
+        recipient_id = int(parts[2])
+    except (TypeError, ValueError):
+        await query.answer("Не удалось определить получателя.", show_alert=True)
+        return
+    recipient_name = parts[3] or "этого человека"
+    await query.answer()
 
     user_id = query.from_user.id
 
-    active_sessions[user_id] = {
-        'recipient_id': recipient_id,
-        'recipient_name': recipient_name
-    }
+    _remember_active_session(user_id, recipient_id, recipient_name)
 
     keyboard = [[InlineKeyboardButton("❌ Отмена", callback_data="cancel")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -477,7 +597,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
 
     if user_id in reply_sessions:
-        del reply_sessions[user_id]
+        _drop_reply_session(user_id)
 
         try:
             await query.message.delete()
@@ -529,7 +649,7 @@ async def start_reply_action(
     if user_id in reply_sessions:
         await delete_reply_prompt(context, user_id)
 
-        del reply_sessions[user_id]
+        _drop_reply_session(user_id)
         context.user_data.clear()
 
     if data == "reply_anon":
@@ -562,7 +682,7 @@ async def start_reply_action(
         parse_mode="HTML"
     )
 
-    reply_sessions[user_id] = original_sender_id
+    _remember_reply_session(user_id, original_sender_id)
     context.user_data['question_message_id'] = msg.message_id
     return True
 
@@ -1058,7 +1178,13 @@ def main():
 
     asyncio.run(initialize_database())
 
-    app = Application.builder().token(TOKEN).build()
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .post_init(_application_post_init)
+        .post_shutdown(_application_post_shutdown)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("info", info_command))

@@ -52,6 +52,27 @@ _subgram_balance_cache = {
 }
 _subgram_balance_lock = asyncio.Lock()
 
+# The browser already receives PostgreSQL invalidation events through SSE.
+# Coalesce simultaneous dashboard requests as an additional protection for
+# multiple open admin tabs and reconnects; database notifications invalidate
+# this snapshot immediately.
+DASHBOARD_STATS_CACHE_TTL = 2.0
+_dashboard_stats_cache = {
+    "expires_at": 0.0,
+    "value": None,
+    "day_start": None,
+}
+_dashboard_stats_lock = asyncio.Lock()
+_dashboard_stats_generation = 0
+
+
+def _invalidate_dashboard_stats() -> None:
+    global _dashboard_stats_generation
+    _dashboard_stats_generation += 1
+    _dashboard_stats_cache["expires_at"] = 0.0
+    _dashboard_stats_cache["value"] = None
+    _dashboard_stats_cache["day_start"] = None
+
 
 def _publish_dashboard_event(payload: str = "changed") -> None:
     """Wake every connected dashboard without doing database work here."""
@@ -84,6 +105,7 @@ async def _dashboard_listener() -> None:
             )
 
             def on_notification(_connection, _pid, _channel, payload):
+                _invalidate_dashboard_stats()
                 _publish_dashboard_event(payload or "changed")
 
             callback = on_notification
@@ -490,6 +512,78 @@ SELECT
           AND heartbeat_at >= NOW() - INTERVAL '2 minutes'
     ) AS worker_alive
 """
+
+
+def _normalize_dashboard_stats(row) -> dict:
+    """Copy one asyncpg row into a small immutable-style dashboard snapshot."""
+    return {
+        "total_users": int(row["total_users"] or 0),
+        "users_today": int(row["users_today"] or 0),
+        "total_messages": int(row["total_messages"] or 0),
+        "messages_today": int(row["messages_today"] or 0),
+        "total_subscriptions": int(row["total_subscriptions"] or 0),
+        "subscriptions_today": int(row["subscriptions_today"] or 0),
+        "payment_visitors": int(row["payment_visitors"] or 0),
+        "payment_visitors_today": int(row["payment_visitors_today"] or 0),
+        "total_successful_amount": row["total_successful_amount"] or 0,
+        "users_today_chart": list(row["users_today_chart"] or []),
+        "subscriptions_today_chart": list(row["subscriptions_today_chart"] or []),
+        "messages_today_chart": list(row["messages_today_chart"] or []),
+        "payment_visitors_today_chart": list(row["payment_visitors_today_chart"] or []),
+        "worker_alive": bool(row["worker_alive"]),
+    }
+
+
+async def get_dashboard_stats() -> dict:
+    """Return one short-lived, shared dashboard snapshot.
+
+    PostgreSQL triggers invalidate this cache after relevant commits.  The
+    small TTL is a fallback for missed notifications and for time-based
+    values such as the worker heartbeat and today's chart boundary.  The lock
+    also coalesces concurrent page/API requests into one SQL query.
+    """
+    day_start = dashboard_day_start_utc_naive()
+    now = dashboard_now_utc_naive()
+
+    def cached_value():
+        cached = _dashboard_stats_cache
+        if (
+            cached["value"] is not None
+            and cached["expires_at"] > monotonic_clock.monotonic()
+            and cached["day_start"] == day_start
+        ):
+            return dict(cached["value"])
+        return None
+
+    value = cached_value()
+    if value is not None:
+        return value
+
+    async with _dashboard_stats_lock:
+        value = cached_value()
+        if value is not None:
+            return value
+
+        generation = _dashboard_stats_generation
+        conn = await database.get_conn()
+        try:
+            row = await conn.fetchrow(DASHBOARD_STATS_QUERY, day_start, now)
+        finally:
+            await database.release_conn(conn)
+
+        value = _normalize_dashboard_stats(row)
+        # A NOTIFY may have arrived while the query was running.  In that
+        # case this snapshot can predate the committed change; return it to
+        # the current request but leave the cache invalidated for the next one.
+        if generation == _dashboard_stats_generation:
+            _dashboard_stats_cache.update(
+                {
+                    "expires_at": monotonic_clock.monotonic() + DASHBOARD_STATS_CACHE_TTL,
+                    "value": value,
+                    "day_start": day_start,
+                }
+            )
+        return dict(value)
 
 
 SUBSCRIPTION_STATUS_META = {
@@ -1236,35 +1330,27 @@ async def dashboard_data(request: Request):
     if request.query_params.get("refresh") == "1":
         _subgram_balance_cache["expires_at"] = 0.0
     try:
-        conn = await database.get_conn()
-        try:
-            stats = await conn.fetchrow(
-                DASHBOARD_STATS_QUERY,
-                dashboard_day_start_utc_naive(),
-                dashboard_now_utc_naive(),
-            )
-        finally:
-            await database.release_conn(conn)
+        stats = await get_dashboard_stats()
 
         subgram_snapshot = await get_dashboard_subgram_balance()
 
         return JSONResponse(
             content={
                 "ok": True,
-                "total_users": int(stats["total_users"] or 0),
-                "users_today": int(stats["users_today"] or 0),
-                "total_messages": int(stats["total_messages"] or 0),
-                "messages_today": int(stats["messages_today"] or 0),
-                "total_subscriptions": int(stats["total_subscriptions"] or 0),
-                "subscriptions_today": int(stats["subscriptions_today"] or 0),
-                "payment_visitors": int(stats["payment_visitors"] or 0),
-                "payment_visitors_today": int(stats["payment_visitors_today"] or 0),
+                "total_users": stats["total_users"],
+                "users_today": stats["users_today"],
+                "total_messages": stats["total_messages"],
+                "messages_today": stats["messages_today"],
+                "total_subscriptions": stats["total_subscriptions"],
+                "subscriptions_today": stats["subscriptions_today"],
+                "payment_visitors": stats["payment_visitors"],
+                "payment_visitors_today": stats["payment_visitors_today"],
                 "total_successful_amount": format_dashboard_amount(stats["total_successful_amount"]),
-                "users_today_chart": list(stats["users_today_chart"] or []),
-                "subscriptions_today_chart": list(stats["subscriptions_today_chart"] or []),
-                "messages_today_chart": list(stats["messages_today_chart"] or []),
-                "payment_visitors_today_chart": list(stats["payment_visitors_today_chart"] or []),
-                "worker_alive": bool(stats["worker_alive"]),
+                "users_today_chart": stats["users_today_chart"],
+                "subscriptions_today_chart": stats["subscriptions_today_chart"],
+                "messages_today_chart": stats["messages_today_chart"],
+                "payment_visitors_today_chart": stats["payment_visitors_today_chart"],
+                "worker_alive": stats["worker_alive"],
                 "subgram_balance": format_subgram_balance(subgram_snapshot.get("value")),
                 "subgram_ok": bool(subgram_snapshot.get("ok")),
                 "subgram_error": subgram_snapshot.get("error"),
@@ -1365,31 +1451,23 @@ async def dashboard(request: Request):
         "ok": False,
         "error": None,
     }
-    
+
     try:
-        conn = await database.get_conn()
-        try:
-            stats = await conn.fetchrow(
-                DASHBOARD_STATS_QUERY,
-                dashboard_day_start_utc_naive(),
-                dashboard_now_utc_naive(),
-            )
-            total_users = stats["total_users"]
-            users_today = stats["users_today"]
-            total_messages = stats["total_messages"]
-            messages_today = stats["messages_today"]
-            total_subscriptions = stats["total_subscriptions"]
-            subscriptions_today = stats["subscriptions_today"]
-            payment_visitors = stats["payment_visitors"]
-            payment_visitors_today = stats["payment_visitors_today"]
-            total_successful_amount = stats["total_successful_amount"] or 0
-            users_today_chart = list(stats["users_today_chart"] or [])
-            subscriptions_today_chart = list(stats["subscriptions_today_chart"] or [])
-            messages_today_chart = list(stats["messages_today_chart"] or [])
-            payment_visitors_today_chart = list(stats["payment_visitors_today_chart"] or [])
-            worker_alive = bool(stats["worker_alive"])
-        finally:
-            await database.release_conn(conn)
+        stats = await get_dashboard_stats()
+        total_users = stats["total_users"]
+        users_today = stats["users_today"]
+        total_messages = stats["total_messages"]
+        messages_today = stats["messages_today"]
+        total_subscriptions = stats["total_subscriptions"]
+        subscriptions_today = stats["subscriptions_today"]
+        payment_visitors = stats["payment_visitors"]
+        payment_visitors_today = stats["payment_visitors_today"]
+        total_successful_amount = stats["total_successful_amount"]
+        users_today_chart = stats["users_today_chart"]
+        subscriptions_today_chart = stats["subscriptions_today_chart"]
+        messages_today_chart = stats["messages_today_chart"]
+        payment_visitors_today_chart = stats["payment_visitors_today_chart"]
+        worker_alive = stats["worker_alive"]
     except Exception as e:
         print(f"❌ Ошибка БД в дашборде: {e}", flush=True)
         import traceback
