@@ -1454,6 +1454,14 @@ async def dashboard(request: Request):
             }}
         }}
         async function refreshDashboardStats(forceSubgram = false) {{
+            // An INSERT can emit several dashboard invalidations in a burst.
+            // Share one in-flight request so those events do not fan out into
+            // concurrent identical PostgreSQL snapshots.
+            if (window.dashboardRefreshInFlight) {{
+                window.dashboardRefreshPending = window.dashboardRefreshPending || forceSubgram;
+                return window.dashboardRefreshInFlight;
+            }}
+            window.dashboardRefreshInFlight = (async () => {{
             try {{
                 const response = await fetch('/dashboard/data' + (forceSubgram ? '?refresh=1' : ''), {{ cache: 'no-store' }});
                 if (!response.ok) return;
@@ -1502,14 +1510,35 @@ async def dashboard(request: Request):
                 }}
             }} catch (error) {{
                 // Keep the last known counters visible during a temporary DB/network error.
+            }} finally {{
+                window.dashboardRefreshInFlight = null;
+                if (window.dashboardRefreshPending) {{
+                    const pendingForceSubgram = window.dashboardRefreshPending;
+                    window.dashboardRefreshPending = false;
+                    window.setTimeout(() => refreshDashboardStats(pendingForceSubgram), 150);
+                }}
             }}
+            }})();
+            return window.dashboardRefreshInFlight;
         }}
         const refreshSubgramButton = document.getElementById('refresh-subgram-balance');
         if (refreshSubgramButton) refreshSubgramButton.addEventListener('click', async () => {{
             await refreshDashboardStats(true);
         }});
         const dashboardEvents = new EventSource('/dashboard/events');
-        dashboardEvents.addEventListener('dashboard', refreshDashboardStats);
+        let dashboardSseInitialized = false;
+        dashboardEvents.addEventListener('dashboard', (event) => {{
+            // The initial HTML already contains a fresh snapshot. Skip the
+            // SSE handshake refresh, but refresh after reconnects or changes.
+            let reason = '';
+            try {{ reason = JSON.parse(event.data || '{{}}').reason || ''; }} catch (error) {{}}
+            if (reason === 'connected' && !dashboardSseInitialized) {{
+                dashboardSseInitialized = true;
+                return;
+            }}
+            dashboardSseInitialized = true;
+            refreshDashboardStats();
+        }});
         // EventSource automatically reconnects after a network or proxy
         // interruption; the server sends a fresh invalidation on reconnect.
         dashboardEvents.onerror = () => {{

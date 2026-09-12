@@ -223,6 +223,10 @@ async def _ensure_payment_link_visits_schema(conn):
         CREATE INDEX IF NOT EXISTS idx_payment_link_visits_last_visited_at
         ON payment_link_visits (last_visited_at DESC)
     """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_payment_link_visits_first_visited_at
+        ON payment_link_visits (first_visited_at DESC)
+    """)
 
 
 async def ensure_admin_dashboard_notifications(conn):
