@@ -118,12 +118,12 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    retry_low_users = await subscription_manager.get_all_users_in_retry_low()
+    retry_low_count = await subscription_manager.count_users_in_retry_low()
     return {
         "status": "healthy",
         "scheduler_enabled": config.PAYMENT_SCHEDULER_ENABLED,
         "scheduler_running": scheduler.running,
-        "retry_low_count": len(retry_low_users)
+        "retry_low_count": retry_low_count
     }
 
 

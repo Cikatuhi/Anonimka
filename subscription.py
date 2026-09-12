@@ -72,6 +72,13 @@ class SubscriptionManager:
             logger.error(f"Error getting retry_low users: {e}")
             return []
 
+    async def count_users_in_retry_low(self) -> int:
+        try:
+            return int(await database.count_users_in_retry_low())
+        except Exception as e:
+            logger.error(f"Error counting retry_low users: {e}")
+            return 0
+
     async def create_user_subscription(self, user_id: str, card_token: str) -> dict:
         try:
             await database.create_subscription(

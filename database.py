@@ -890,6 +890,15 @@ async def get_all_users_in_retry_low():
     finally:
         await release_conn(conn)
 
+async def count_users_in_retry_low():
+    conn = await get_conn()
+    try:
+        return await conn.fetchval(
+            "SELECT COUNT(*) FROM subscriptions WHERE status = 'retry_low'"
+        )
+    finally:
+        await release_conn(conn)
+
 async def count_active_subscriptions():
     conn = await get_conn()
     try:
