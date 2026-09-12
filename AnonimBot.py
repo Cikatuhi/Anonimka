@@ -129,6 +129,9 @@ async def _application_post_shutdown(application) -> None:
             await task
         except asyncio.CancelledError:
             pass
+    # The bot does not use a FastAPI lifespan, so close the shared SubGram
+    # client explicitly when python-telegram-bot stops polling.
+    await database.close_http_session()
 
 ADMIN_ID = int(os.getenv("ADMIN_ID", "7683869901"))
 VALENTINE_CUSTOM_EMOJI_ID = "5472019095106886003"
