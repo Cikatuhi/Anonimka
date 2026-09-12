@@ -580,12 +580,13 @@ async def ensure_admin_indexes() -> None:
     )
     conn = await database.get_conn()
     try:
-        for statement in statements:
-            try:
-                await conn.execute(statement)
-            except Exception as exc:
-                # Older installations may not have every optional table/column.
-                print(f"⚠️ Не удалось создать индекс админки: {exc}", flush=True)
+        async with database.schema_migration_lock(conn):
+            for statement in statements:
+                try:
+                    await conn.execute(statement)
+                except Exception as exc:
+                    # Older installations may not have every optional table/column.
+                    print(f"⚠️ Не удалось создать индекс админки: {exc}", flush=True)
     finally:
         await database.release_conn(conn)
 
@@ -599,10 +600,11 @@ async def lifespan(app: FastAPI):
     await database.ensure_payment_link_visits_schema()
     conn = await database.get_conn()
     try:
-        await database.ensure_webhook_events_schema(conn)
-        await database.ensure_payment_events_schema(conn)
-        await database.ensure_payment_events_user_fk_protection(conn)
-        await database.ensure_admin_dashboard_notifications(conn)
+        async with database.schema_migration_lock(conn):
+            await database.ensure_webhook_events_schema(conn)
+            await database.ensure_payment_events_schema(conn)
+            await database.ensure_payment_events_user_fk_protection(conn)
+            await database.ensure_admin_dashboard_notifications(conn)
     finally:
         await database.release_conn(conn)
     await ensure_admin_indexes()

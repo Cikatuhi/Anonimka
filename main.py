@@ -45,20 +45,21 @@ async def lifespan(app: FastAPI):
     # Migrations for the active token-charge system. Safe to run on every startup.
     conn = await database.get_conn()
     try:
-        await database.ensure_message_retention_schema(conn)
-        await database.ensure_webhook_events_schema(conn)
-        await database.ensure_payment_events_schema(conn)
-        await database.ensure_payment_events_user_fk_protection(conn)
-        await conn.execute("""
+        async with database.schema_migration_lock(conn):
+            await database.ensure_message_retention_schema(conn)
+            await database.ensure_webhook_events_schema(conn)
+            await database.ensure_payment_events_schema(conn)
+            await database.ensure_payment_events_user_fk_protection(conn)
+            await conn.execute("""
             ALTER TABLE subscriptions
             ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP WITH TIME ZONE
-        """)
-        await conn.execute("""
+            """)
+            await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_subscriptions_next_retry_at
             ON subscriptions(next_retry_at)
-        """)
-        await database.ensure_subscription_user_fk_protection(conn)
-        logger.info("✅ retry_low/payment_events migrations checked")
+            """)
+            await database.ensure_subscription_user_fk_protection(conn)
+            logger.info("✅ retry_low/payment_events migrations checked")
     finally:
         await database.release_conn(conn)
 

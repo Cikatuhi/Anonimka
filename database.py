@@ -31,6 +31,18 @@ SUBGRAM_API_KEY = os.getenv("SUBGRAM_API_KEY", "")
 
 pool = None
 _pool_lock = asyncio.Lock()
+SCHEMA_MIGRATION_LOCK = "anonimno.schema-migrations"
+
+
+@asynccontextmanager
+async def schema_migration_lock(conn):
+    """Serialize startup DDL across all application processes."""
+    async with conn.transaction():
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext($1))",
+            SCHEMA_MIGRATION_LOCK,
+        )
+        yield
 
 async def get_conn():
     """Gets a connection from the process-local pool."""
@@ -186,9 +198,10 @@ async def ensure_broadcast_schema():
     """Run the broadcast migration from processes that do not call init_db."""
     conn = await get_conn()
     try:
-        await _ensure_broadcast_schema(conn)
-        await _ensure_payment_link_visits_schema(conn)
-        await _ensure_unsubscribed_schema(conn)
+        async with schema_migration_lock(conn):
+            await _ensure_broadcast_schema(conn)
+            await _ensure_payment_link_visits_schema(conn)
+            await _ensure_unsubscribed_schema(conn)
     finally:
         await release_conn(conn)
 
@@ -313,7 +326,8 @@ async def ensure_unsubscribed_schema():
     """Run the unsubscribe archive migration from web processes."""
     conn = await get_conn()
     try:
-        await _ensure_unsubscribed_schema(conn)
+        async with schema_migration_lock(conn):
+            await _ensure_unsubscribed_schema(conn)
     finally:
         await release_conn(conn)
 
@@ -322,7 +336,8 @@ async def ensure_payment_link_visits_schema():
     """Run the payment-link visits migration from web processes."""
     conn = await get_conn()
     try:
-        await _ensure_payment_link_visits_schema(conn)
+        async with schema_migration_lock(conn):
+            await _ensure_payment_link_visits_schema(conn)
     finally:
         await release_conn(conn)
 
@@ -584,7 +599,8 @@ async def _ensure_core_schema(conn):
 async def init_db():
     conn = await get_conn()
     try:
-        await conn.execute("""
+        async with schema_migration_lock(conn):
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 telegram_id BIGINT PRIMARY KEY,
                 username TEXT,
@@ -594,7 +610,7 @@ async def init_db():
             )
         """)
         
-        await conn.execute("""
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS blocked_users (
                 telegram_id BIGINT PRIMARY KEY,
                 username TEXT,
@@ -603,7 +619,7 @@ async def init_db():
             )
         """)
         
-        await conn.execute("""
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id SERIAL PRIMARY KEY,
                 sender_id BIGINT NOT NULL,
@@ -613,10 +629,10 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        await ensure_message_retention_schema(conn)
-        await ensure_webhook_events_schema(conn)
+            await ensure_message_retention_schema(conn)
+            await ensure_webhook_events_schema(conn)
 
-        await conn.execute("""
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE RESTRICT,
@@ -632,9 +648,9 @@ async def init_db():
 
         # Keep an existing database from an older version compatible with the
         # current bot before any service starts reading subscription data.
-        await _ensure_core_schema(conn)
+            await _ensure_core_schema(conn)
 
-        await conn.execute("""
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS broadcast_jobs (
                 id SERIAL PRIMARY KEY,
                 message TEXT NOT NULL,
@@ -655,11 +671,11 @@ async def init_db():
             )
         """)
 
-        await _ensure_broadcast_schema(conn)
+            await _ensure_broadcast_schema(conn)
         
-        await _ensure_unsubscribed_schema(conn)
+            await _ensure_unsubscribed_schema(conn)
         
-        await conn.execute("""
+            await conn.execute("""
             CREATE TABLE IF NOT EXISTS payment_tokens (
                 id SERIAL PRIMARY KEY,
                 token TEXT UNIQUE NOT NULL,
@@ -670,17 +686,17 @@ async def init_db():
             )
         """)
         
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_status ON broadcast_jobs(status)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_unsubscribed_users_id ON unsubscribed_users(telegram_id)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_tokens_token ON payment_tokens(token)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_tokens_user_id ON payment_tokens(user_id)")
-        await ensure_admin_dashboard_notifications(conn)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_status ON broadcast_jobs(status)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_unsubscribed_users_id ON unsubscribed_users(telegram_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_tokens_token ON payment_tokens(token)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_tokens_user_id ON payment_tokens(user_id)")
+            await ensure_admin_dashboard_notifications(conn)
 
-        print("✅ База данных инициализирована")
+            print("✅ База данных инициализирована")
     finally:
         await release_conn(conn)
 
