@@ -1541,11 +1541,20 @@ async def _get_subgram_session():
 async def close_http_session():
     """Close the shared external HTTP session during service shutdown."""
     global _subgram_session
-    if _subgram_session is not None and not _subgram_session.closed:
-        await _subgram_session.close()
-    _subgram_session = None
+    async with _subgram_check_lock:
+        inflight = list(_subgram_check_inflight.values())
+        _subgram_check_inflight.clear()
+    for task in inflight:
+        task.cancel()
+    if inflight:
+        await asyncio.gather(*inflight, return_exceptions=True)
+
+    async with _subgram_session_lock:
+        session = _subgram_session
+        _subgram_session = None
+    if session is not None and not session.closed:
+        await session.close()
     _subgram_check_cache.clear()
-    _subgram_check_inflight.clear()
 
 
 async def _fetch_subgram_check(user_id: int, chat_id: int) -> dict:
