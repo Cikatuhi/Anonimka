@@ -31,7 +31,13 @@ SUBGRAM_API_KEY = os.getenv("SUBGRAM_API_KEY", "")
 
 pool = None
 _pool_lock = asyncio.Lock()
+_subgram_session = None
+_subgram_session_lock = asyncio.Lock()
 SCHEMA_MIGRATION_LOCK = "anonimno.schema-migrations"
+
+# Keep the existing 10-second upper bound while failing stalled connections
+# earlier; a shared session handles the common case without a new TCP setup.
+SUBGRAM_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=2, sock_read=8)
 
 
 @asynccontextmanager
@@ -691,9 +697,13 @@ async def init_db():
         """)
         
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_registered_at ON users(registered_at DESC)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_sender_created_at ON messages(sender_id, created_at DESC)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_recipient_created_at ON messages(recipient_id, created_at DESC)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_status ON broadcast_jobs(status)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_user_created_at ON subscriptions(user_id, created_at DESC)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_unsubscribed_users_id ON unsubscribed_users(telegram_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_tokens_token ON payment_tokens(token)")
@@ -708,17 +718,66 @@ async def init_db():
 # ОСТАЛЬНЫЕ ФУНКЦИИ (ПОЛНЫЙ СПИСОК)
 # ============================================
 
-async def register_user(user_id: int, username: str, first_name: str):
+async def register_user(
+    user_id: int,
+    username: str,
+    first_name: str,
+    *,
+    clear_blocked: bool = False,
+):
     conn = await get_conn()
     try:
-        result = await conn.fetchrow("SELECT telegram_id FROM users WHERE telegram_id = $1", user_id)
-        if not result:
-            await conn.execute(
-                "INSERT INTO users (telegram_id, username, first_name, registered_at) VALUES ($1, $2, $3, NOW())",
-                user_id, username, first_name
+        # Restore a user and optionally clear a previous Telegram block marker
+        # atomically.  This replaces the old SELECT -> DELETE -> INSERT
+        # sequence with one round trip while preserving other callers that
+        # only register a user.
+        row = await conn.fetchrow(
+            """
+            WITH unblocked AS (
+                DELETE FROM blocked_users
+                WHERE telegram_id = $1 AND $4::boolean
+                RETURNING telegram_id
             )
-            return True
-        return False
+            INSERT INTO users (telegram_id, username, first_name, registered_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (telegram_id) DO NOTHING
+            RETURNING telegram_id
+            """,
+            user_id,
+            username,
+            first_name,
+            clear_blocked,
+        )
+        return row is not None
+    finally:
+        await release_conn(conn)
+
+
+async def get_random_user(exclude_user_id: int):
+    """Return one random user directly from PostgreSQL.
+
+    The previous implementation transferred up to 1,000 IDs to Python and
+    then issued another query for the selected profile.  Keep the same
+    candidate set, but choose the user and return the profile in one query.
+    """
+    conn = await get_conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT telegram_id, username, first_name
+            FROM (
+                SELECT telegram_id, username, first_name
+                FROM users
+                ORDER BY registered_at
+                LIMIT 1000
+            ) AS candidates
+            WHERE telegram_id <> $1
+            ORDER BY random()
+            LIMIT 1
+            """,
+            exclude_user_id,
+        )
+        return dict(row) if row else None
     finally:
         await release_conn(conn)
 
@@ -1459,6 +1518,28 @@ async def close_pool():
     if pool is not None:
         await pool.close()
         pool = None
+    await close_http_session()
+
+
+async def _get_subgram_session():
+    """Return a process-local HTTP session with connection reuse."""
+    global _subgram_session
+    if _subgram_session is None or _subgram_session.closed:
+        async with _subgram_session_lock:
+            if _subgram_session is None or _subgram_session.closed:
+                connector = aiohttp.TCPConnector(limit=20, ttl_dns_cache=300)
+                _subgram_session = aiohttp.ClientSession(connector=connector)
+    return _subgram_session
+
+
+async def close_http_session():
+    """Close the shared external HTTP session during service shutdown."""
+    global _subgram_session
+    if _subgram_session is not None and not _subgram_session.closed:
+        await _subgram_session.close()
+    _subgram_session = None
+
+
 async def check_subgram(user_id: int, chat_id: int) -> dict:
     """
     Проверяет подписку пользователя через SubGram.
@@ -1482,8 +1563,8 @@ async def check_subgram(user_id: int, chat_id: int) -> dict:
     }
     
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=10) as response:
+        session = await _get_subgram_session()
+        async with session.post(url, headers=headers, json=payload, timeout=SUBGRAM_TIMEOUT) as response:
                 response_text = await response.text()
                 if response.status == 200:
                     try:
@@ -1519,8 +1600,8 @@ async def get_subgram_balance() -> dict:
     }
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json={}, timeout=10) as response:
+        session = await _get_subgram_session()
+        async with session.post(url, headers=headers, json={}, timeout=SUBGRAM_TIMEOUT) as response:
                 if response.status == 200:
                     data = await response.json()
                     print(f"🔍 SubGram Balance ответ: {data}")

@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import random
 from datetime import datetime
 from dotenv import load_dotenv
 from time_utils import as_utc, now_msk
@@ -96,10 +95,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username or "без_юзернейма"
     first_name = user.first_name or "Пользователь"
 
-    if await database.is_user_blocked(user_id):
-        await database.remove_blocked_user(user_id)
-
-    await database.register_user(user_id, username, first_name)
+    await database.register_user(
+        user_id,
+        username,
+        first_name,
+        clear_blocked=True,
+    )
 
     await send_welcome_sticker(update.message)
 
@@ -752,12 +753,14 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_sender_as_new_message(query, sender_id)
             await query.answer("🔓 Отправитель раскрыт!")
         else:
-            all_users = await database.get_all_users(limit=1000)
-            available_users = [u for u in all_users if u != user_id]
-            
-            if available_users:
-                random_user_id = random.choice(available_users)
-                await show_sender_as_new_message(query, random_user_id)
+            random_user = await database.get_random_user(user_id)
+
+            if random_user:
+                await show_sender_as_new_message(
+                    query,
+                    random_user["telegram_id"],
+                    sender_data=random_user,
+                )
                 await query.answer("🔓 Показан случайный пользователь (рассылка)")
             else:
                 await query.message.reply_text(
@@ -781,8 +784,9 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer("🔗 Ссылка на оплату отправлена!")
 
 
-async def show_sender_as_new_message(query, sender_id):
-    sender_data = await database.get_user(sender_id)
+async def show_sender_as_new_message(query, sender_id, sender_data=None):
+    if sender_data is None:
+        sender_data = await database.get_user(sender_id)
     
     if sender_data:
         username = sender_data.get('username', 'без_юзернейма')
@@ -860,26 +864,16 @@ async def show_sender(query, user_id):
             )
             return
     
-    all_users = await database.get_all_users(limit=1000)
-    available_users = [u for u in all_users if u != user_id]
-    
-    if not available_users:
+    random_user = await database.get_random_user(user_id)
+
+    if not random_user:
         await query.edit_message_text(
             text="😅 К сожалению, в базе пока нет других пользователей.",
             parse_mode="HTML"
         )
         return
-    
-    random_user_id = random.choice(available_users)
-    random_user = await database.get_user(random_user_id)
-    
-    if not random_user:
-        await query.edit_message_text(
-            text="😅 Произошла ошибка. Попробуйте позже.",
-            parse_mode="HTML"
-        )
-        return
-    
+
+    random_user_id = random_user['telegram_id']
     username = random_user.get('username', 'без_юзернейма')
     first_name = random_user.get('first_name', 'Пользователь')
     
