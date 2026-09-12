@@ -206,9 +206,9 @@ async def record_recipient_results(
 ) -> dict[str, int]:
     """Persist a leased batch and advance job counters in one transaction.
 
-    Only rows that are still ``processing`` are counted.  This protects the
-    counters when an administrator pauses a job or stale-work recovery
-    releases a lease while Telegram requests are still finishing.
+    Rows that are still leased or were just released by pause/recovery are
+    counted.  Final rows are excluded so a retry after a worker interruption
+    cannot increment the job counters twice.
     """
     if not results:
         return {}
@@ -243,7 +243,7 @@ async def record_recipient_results(
                     FROM updates
                     WHERE recipients.job_id = $1
                       AND recipients.user_id = updates.user_id
-                      AND recipients.status = 'processing'
+                      AND recipients.status IN ('processing', 'pending', 'cancelled')
                     RETURNING recipients.status
                 )
                 SELECT status, COUNT(*)::INTEGER AS count
