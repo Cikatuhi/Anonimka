@@ -2843,57 +2843,6 @@ async def archive_broadcast(job_id: int):
             }
         )
 
-@app.post("/subscription/block/{user_id}")
-async def block_subscription(user_id: int):
-    """Блокирует подписку пользователя (меняет статус на 'cancelled')"""
-    try:
-        conn = await database.get_conn()
-        try:
-            # Проверяем, есть ли подписка
-            row = await conn.fetchrow(
-                "SELECT id, status FROM subscriptions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
-                user_id
-            )
-            if not row:
-                return JSONResponse(
-                    content={"success": False, "error": "Подписка не найдена"},
-                    status_code=404
-                )
-            
-            if row['status'] == 'cancelled':
-                return JSONResponse(
-                    content={"success": False, "error": "Подписка уже заблокирована"},
-                    status_code=400
-                )
-            
-            # Сохраняем полный снимок подписки и переводим её в cancelled
-            # одной транзакцией внутри database.unsubscribe_user.
-            user_data = await database.get_user(user_id)
-            success = await database.unsubscribe_user(
-                user_id,
-                user_data.get('username', '') if user_data else '',
-                user_data.get('first_name', '') if user_data else '',
-                'admin_block'
-            )
-            if not success:
-                return JSONResponse(
-                    content={"success": False, "error": "Не удалось сохранить данные отписки"},
-                    status_code=500
-                )
-            
-            return JSONResponse(
-                content={"success": True, "message": f"Подписка пользователя {user_id} заблокирована"}
-            )
-        finally:
-            await database.release_conn(conn)
-    except Exception as e:
-        print(f"❌ Ошибка блокировки подписки: {e}")
-        return JSONResponse(
-            content={"success": False, "error": str(e)},
-            status_code=500
-        )
-
-
 @app.get("/broadcast/list", response_class=HTMLResponse)
 async def broadcast_list(request: Request):
     try:
