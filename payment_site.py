@@ -1,14 +1,11 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, Response
 import os
-import sys
 import json
 from contextlib import asynccontextmanager
-
-sys.path.append('/root/Anonimno-Artem-')
 import database
 
-SITE_URL = os.getenv("SITE_URL", "https://secretky.ru").rstrip("/")
+SITE_URL = os.getenv("SITE_URL", "https://anonimnoe.ru").rstrip("/")
 DOC1_URL = f"{SITE_URL}/doc1"
 DOC2_URL = f"{SITE_URL}/doc2"
 DOC3_URL = f"{SITE_URL}/doc3"
@@ -47,16 +44,6 @@ async def payment_favicon():
         media_type="image/svg+xml",
         headers={"Cache-Control": "public, max-age=86400"},
     )
-
-
-
-async def get_show_checkboxes() -> bool:
-    try:
-        value = await database.get_setting('show_payment_checkboxes', 'true')
-        return value == 'true'
-    except Exception as e:
-        print(f"❌ Ошибка получения настройки: {e}")
-        return True
 
 @app.get("/", response_class=HTMLResponse)
 async def main_page():
@@ -429,33 +416,49 @@ tr:hover { background: #f8f9fa; }
 
 @app.get("/pay/{user_id}", response_class=HTMLResponse)
 async def payment_page(user_id: int, request: Request):
-    conn = await database.get_conn()
-    try:
+    # The consent and checkout views share one database snapshot.  This keeps
+    # a page open to one pool checkout instead of three separate connections.
+    checkout_requested = request.query_params.get("checkout") == "1"
+    async with database.connection() as conn:
         row = await conn.fetchrow(
-            "SELECT telegram_id FROM users WHERE telegram_id = $1",
+            """
+            SELECT
+                EXISTS(
+                    SELECT 1 FROM users WHERE telegram_id = $1
+                ) AS user_exists,
+                COALESCE(
+                    (SELECT value FROM settings WHERE key = 'show_payment_checkboxes'),
+                    'true'
+                ) = 'true' AS show_checkboxes
+            """,
             user_id
         )
-        if not row:
+        if not row["user_exists"]:
             return HTMLResponse(content="<h1>Пользователь не найден</h1>", status_code=404)
-    finally:
-        await database.release_conn(conn)
+        # A visit is an analytics event only; it must not be confused with a
+        # successful CloudPayments transaction.  The checkout URL is a
+        # continuation of the same visit, so it is intentionally not counted
+        # a second time.
+        if not checkout_requested:
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO payment_link_visits (user_id)
+                    VALUES ($1)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        visit_count = payment_link_visits.visit_count + 1,
+                        last_visited_at = CURRENT_TIMESTAMP
+                    """,
+                    user_id,
+                )
+            except Exception as exc:
+                # Analytics must not prevent a user from opening the page.
+                print(
+                    f"⚠️ Не удалось записать переход к оплате для {user_id}: {exc}",
+                    flush=True,
+                )
 
-    # The consent screen intentionally has its own URL state.  This means a
-    # user can complete the checkboxes once and then refresh the payment page
-    # without seeing the consent overlay again.
-    checkout_requested = request.query_params.get("checkout") == "1"
-
-    # A visit is an analytics event only; it must not be confused with a
-    # successful CloudPayments transaction.  The checkout URL is a continuation
-    # of the same visit, so it is intentionally not counted a second time.
-    if not checkout_requested:
-        try:
-            await database.record_payment_link_visit(user_id)
-        except Exception as exc:
-            # Analytics must not prevent a user from opening the payment page.
-            print(f"⚠️ Не удалось записать переход к оплате для {user_id}: {exc}", flush=True)
-
-    show_checkboxes = await get_show_checkboxes()
+        show_checkboxes = row["show_checkboxes"]
 
     if not show_checkboxes or checkout_requested:
         return HTMLResponse(content=f"""
@@ -466,6 +469,7 @@ async def payment_page(user_id: int, request: Request):
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
             <link rel="icon" type="image/svg+xml" href="/pay/favicon.svg?v=mail-v1">
             <title>Anonimka — оформить доступ</title>
+            <link rel="preconnect" href="https://widget.cloudpayments.ru">
             <script src="https://widget.cloudpayments.ru/bundles/paymentblocks.js"></script>
             <style>
                 :root {{
@@ -637,7 +641,6 @@ async def payment_page(user_id: int, request: Request):
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
         <link rel="icon" type="image/svg+xml" href="/pay/favicon.svg?v=mail-v1">
         <title>Anonimka — оплата</title>
-        <script src="https://widget.cloudpayments.ru/bundles/paymentblocks.js"></script>
         <style>
             * {{ margin: 0; padding: 0; box-sizing: border-box; }}
             body {{
