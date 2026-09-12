@@ -1,17 +1,18 @@
 [Unit]
-Description=CloudPayments Payment System
+Description=Anonimka payment webhook and scheduler
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/root/Anonimno-Artem-
-EnvironmentFile=/root/Anonimno-Artem-/.env
-Environment="PATH=/root/Anonimno-Artem-/venv/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="PYTHONPATH=/root/Anonimno-Artem-"
+User=codexops
+Group=codexops
+WorkingDirectory=/opt/anonimka
+EnvironmentFile=/etc/anonimka/anonimka.env
+Environment="PATH=/opt/anonimka/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/opt/anonimka"
 Environment="PORT=8002"
-ExecStart=/root/Anonimno-Artem-/venv/bin/python3 /root/Anonimno-Artem-/main.py
+ExecStart=/opt/anonimka/venv/bin/python3 /opt/anonimka/main.py
 Restart=on-failure
 RestartSec=10
 

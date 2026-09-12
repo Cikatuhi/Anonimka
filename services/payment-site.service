@@ -1,12 +1,17 @@
 [Unit]
-Description=Payment Site (from Git)
-After=network.target
+Description=Anonimka payment site
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/root/Anonimno-Artem-
-ExecStart=/root/Anonimno-Artem-/venv/bin/python3 /root/Anonimno-Artem-/payment_site.py
+User=codexops
+Group=codexops
+WorkingDirectory=/opt/anonimka
+EnvironmentFile=/etc/anonimka/anonimka.env
+Environment="PATH=/opt/anonimka/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/opt/anonimka"
+ExecStart=/opt/anonimka/venv/bin/python3 /opt/anonimka/payment_site.py
 Restart=always
 RestartSec=10
 

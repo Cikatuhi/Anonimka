@@ -1,12 +1,17 @@
 [Unit]
-Description=Telegram Bot Worker (рассылки)
-After=network.target
+Description=Anonimka mailing worker
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/root/Anonimno-Artem-
-ExecStart=/root/Anonimno-Artem-/venv/bin/python3 /root/Anonimno-Artem-/worker.py
+User=codexops
+Group=codexops
+WorkingDirectory=/opt/anonimka
+EnvironmentFile=/etc/anonimka/anonimka.env
+Environment="PATH=/opt/anonimka/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/opt/anonimka"
+ExecStart=/opt/anonimka/venv/bin/python3 /opt/anonimka/worker.py
 Restart=always
 RestartSec=10
 

@@ -1,14 +1,19 @@
 [Unit]
-Description=Admin Panel
-After=network.target
+Description=Anonimka admin panel
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/root/Anonimno-Artem-
+User=codexops
+Group=codexops
+WorkingDirectory=/opt/anonimka
+EnvironmentFile=/etc/anonimka/anonimka.env
+Environment="PATH=/opt/anonimka/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/opt/anonimka"
 Environment="ADMIN_BIND_HOST=127.0.0.1"
 Environment="ADMIN_PORT=8000"
-ExecStart=/root/Anonimno-Artem-/venv/bin/python /root/Anonimno-Artem-/admin_panel.py
+ExecStart=/opt/anonimka/venv/bin/python3 /opt/anonimka/admin_panel.py
 Restart=always
 RestartSec=10
 
