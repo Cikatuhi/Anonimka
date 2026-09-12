@@ -1,6 +1,7 @@
 import asyncio
 import html
 import os
+import time
 
 import httpx
 from dotenv import load_dotenv
@@ -10,6 +11,8 @@ import database
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BATCH_SIZE = 50
+STATUS_CHECK_INTERVAL_SECONDS = 1.0
+HEARTBEAT_INTERVAL_SECONDS = 30.0
 STALE_AFTER_MINUTES = 15
 MAX_SEND_ATTEMPTS = 3
 RETRY_BASE_SECONDS = 1.0
@@ -77,6 +80,19 @@ async def touch_service_heartbeat() -> None:
             ON CONFLICT (service)
             DO UPDATE SET heartbeat_at = EXCLUDED.heartbeat_at
             """
+        )
+
+
+async def touch_job_heartbeat(job_id: int) -> None:
+    """Keep an active broadcast lease alive during slow Telegram requests."""
+    async with database.connection() as conn:
+        await conn.execute(
+            """
+            UPDATE broadcast_jobs
+            SET heartbeat_at = NOW()
+            WHERE id = $1 AND status = 'running'
+            """,
+            job_id,
         )
 
 
@@ -167,6 +183,115 @@ async def claim_recipient_batch(job_id: int, limit: int = BATCH_SIZE):
             )
 
 
+async def get_blocked_user_ids(user_ids: list[int]) -> set[int]:
+    """Load the blocked marker for a whole leased batch in one query."""
+    if not user_ids:
+        return set()
+
+    async with database.connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT telegram_id
+            FROM blocked_users
+            WHERE telegram_id = ANY($1::BIGINT[])
+            """,
+            user_ids,
+        )
+    return {int(row["telegram_id"]) for row in rows}
+
+
+async def record_recipient_results(
+    job_id: int,
+    results: list[tuple[int, str, str | None, str | None]],
+) -> dict[str, int]:
+    """Persist a leased batch and advance job counters in one transaction.
+
+    Only rows that are still ``processing`` are counted.  This protects the
+    counters when an administrator pauses a job or stale-work recovery
+    releases a lease while Telegram requests are still finishing.
+    """
+    if not results:
+        return {}
+
+    user_ids = [user_id for user_id, _, _, _ in results]
+    statuses = [status for _, status, _, _ in results]
+    error_codes = [error_code for _, _, error_code, _ in results]
+    error_messages = [((error_message or "")[:500] or None) for _, _, _, error_message in results]
+
+    async with database.connection() as conn:
+        async with conn.transaction():
+            changed = await conn.fetch(
+                """
+                WITH updates(user_id, status, error_code, error_message) AS (
+                    SELECT *
+                    FROM UNNEST(
+                        $2::BIGINT[],
+                        $3::TEXT[],
+                        $4::TEXT[],
+                        $5::TEXT[]
+                    )
+                ), changed AS (
+                    UPDATE broadcast_job_recipients AS recipients
+                    SET status = updates.status,
+                        error_code = updates.error_code,
+                        error_message = updates.error_message,
+                        sent_at = CASE
+                            WHEN updates.status = 'sent' THEN COALESCE(recipients.sent_at, NOW())
+                            ELSE recipients.sent_at
+                        END,
+                        updated_at = NOW()
+                    FROM updates
+                    WHERE recipients.job_id = $1
+                      AND recipients.user_id = updates.user_id
+                      AND recipients.status = 'processing'
+                    RETURNING recipients.status
+                )
+                SELECT status, COUNT(*)::INTEGER AS count
+                FROM changed
+                GROUP BY status
+                """,
+                job_id,
+                user_ids,
+                statuses,
+                error_codes,
+                error_messages,
+            )
+            counts = {str(row["status"]): int(row["count"]) for row in changed}
+            sent = counts.get("sent", 0)
+            failed = counts.get("failed", 0)
+            blocked = counts.get("blocked", 0)
+            if sent or failed or blocked:
+                await conn.execute(
+                    """
+                    UPDATE broadcast_jobs AS jobs
+                    SET sent_users = COALESCE(jobs.sent_users, 0) + $2,
+                        failed_users = COALESCE(jobs.failed_users, 0) + $3,
+                        blocked_users = COALESCE(jobs.blocked_users, 0) + $4,
+                        progress = CASE
+                            WHEN COALESCE(jobs.total_users, 0) > 0 THEN LEAST(
+                                100.0,
+                                (
+                                    COALESCE(jobs.sent_users, 0) + $2
+                                    + COALESCE(jobs.failed_users, 0) + $3
+                                    + COALESCE(jobs.blocked_users, 0) + $4
+                                ) * 100.0 / jobs.total_users
+                            )
+                            ELSE 0
+                        END,
+                        heartbeat_at = CASE
+                            WHEN jobs.status = 'running' THEN NOW()
+                            ELSE jobs.heartbeat_at
+                        END
+                    WHERE jobs.id = $1
+                    """,
+                    job_id,
+                    sent,
+                    failed,
+                    blocked,
+                )
+            return counts
+
+
 async def record_recipient_result(
     job_id: int,
     user_id: int,
@@ -174,27 +299,12 @@ async def record_recipient_result(
     error_code: str | None = None,
     error_message: str | None = None,
 ) -> None:
-    async with database.connection() as conn:
-        await conn.execute(
-            """
-            UPDATE broadcast_job_recipients
-            SET status = $3,
-                error_code = $4,
-                error_message = $5,
-                sent_at = CASE WHEN $3 = 'sent' THEN NOW() ELSE sent_at END,
-                updated_at = NOW()
-            WHERE job_id = $1 AND user_id = $2
-            """,
-            job_id,
-            user_id,
-            status,
-            error_code,
-            (error_message or "")[:500] or None,
-        )
-        await conn.execute(
-            "UPDATE broadcast_jobs SET heartbeat_at = NOW() WHERE id = $1 AND status = 'running'",
-            job_id,
-        )
+    # Keep the single-result helper for compatibility with older call sites;
+    # the worker uses record_recipient_results() for normal batch processing.
+    await record_recipient_results(
+        job_id,
+        [(user_id, status, error_code, error_message)],
+    )
 
 
 async def release_processing(job_id: int, status: str = "pending") -> None:
@@ -314,20 +424,34 @@ async def process_job(job):
                 await asyncio.sleep(1)
                 continue
 
+            await touch_service_heartbeat()
+            blocked_ids = await get_blocked_user_ids([row["user_id"] for row in batch])
+            results = []
+            stopped_status = None
+            next_status_check = time.monotonic() + STATUS_CHECK_INTERVAL_SECONDS
+            next_heartbeat = time.monotonic() + HEARTBEAT_INTERVAL_SECONDS
+
             for row in batch:
                 user_id = row["user_id"]
-                if await get_job_status(job_id) != "running":
+                if time.monotonic() >= next_heartbeat:
+                    await touch_service_heartbeat()
+                    await touch_job_heartbeat(job_id)
+                    next_heartbeat = time.monotonic() + HEARTBEAT_INTERVAL_SECONDS
+                if time.monotonic() >= next_status_check:
+                    status_check = await get_job_status(job_id)
+                    stopped_status = status_check if status_check else "missing"
+                    next_status_check = time.monotonic() + STATUS_CHECK_INTERVAL_SECONDS
+                if stopped_status and stopped_status != "running":
                     break
                 try:
-                    await touch_service_heartbeat()
                     # A recipient may have been marked blocked after the job
                     # was created (or may belong to an older job whose
                     # audience was captured before blocked_users filtering).
                     # Mark it as blocked without calling Telegram.  This keeps
                     # the job progressing while preserving the user's
                     # subscription and billing data.
-                    if await database.is_user_blocked(user_id):
-                        await record_recipient_result(job_id, user_id, "blocked")
+                    if user_id in blocked_ids:
+                        results.append((user_id, "blocked", None, None))
                         continue
                     response = await send_telegram_message(
                         client,
@@ -336,7 +460,7 @@ async def process_job(job):
                         keyboard,
                     )
                     if response.status_code == 200:
-                        await record_recipient_result(job_id, user_id, "sent")
+                        results.append((user_id, "sent", None, None))
                         continue
 
                     try:
@@ -356,21 +480,28 @@ async def process_job(job):
                             )
                     else:
                         result_status = "failed"
-                    await record_recipient_result(
-                        job_id,
-                        user_id,
-                        result_status,
-                        str(response.status_code),
-                        description,
+                    results.append(
+                        (
+                            user_id,
+                            result_status,
+                            str(response.status_code),
+                            description,
+                        )
                     )
                 except Exception as exc:
-                    await record_recipient_result(job_id, user_id, "failed", "exception", str(exc))
+                    results.append((user_id, "failed", "exception", str(exc)))
                 finally:
                     # Keep broadcast traffic below Telegram's global limit.
                     # 40 ms between attempts is at most 25 attempts per second.
                     await asyncio.sleep(0.04)
 
-            await sync_job_counts(job_id)
+            await record_recipient_results(job_id, results)
+            if stopped_status and stopped_status != "running":
+                release_status = "pending" if stopped_status in {"paused", "pending"} else "cancelled"
+                await release_processing(job_id, release_status)
+                await sync_job_counts(job_id)
+                print(f"⏸️ Задача {job_id} остановлена со статусом {stopped_status}", flush=True)
+                return
 
 
 async def main_loop():
