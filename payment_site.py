@@ -470,7 +470,7 @@ async def payment_page(user_id: int, request: Request):
             <link rel="icon" type="image/svg+xml" href="/pay/favicon.svg?v=mail-v1">
             <title>Anonimka — оформить доступ</title>
             <link rel="preconnect" href="https://widget.cloudpayments.ru">
-            <script src="https://widget.cloudpayments.ru/bundles/paymentblocks.js"></script>
+            <script src="https://widget.cloudpayments.ru/bundles/paymentblocks.js" defer></script>
             <style>
                 :root {{
                     --ink: #242424;
@@ -576,10 +576,15 @@ async def payment_page(user_id: int, request: Request):
                 </section>
             </main>
             <script>
-                const container = document.getElementById('widget-container');
-                container.innerHTML = '';
+                window.addEventListener('DOMContentLoaded', () => {{
+                    const container = document.getElementById('widget-container');
+                    if (!window.cp || !window.cp.PaymentBlocks) {{
+                        container.innerHTML = '<div style="text-align:center; color:#b42318; padding:20px;">Не удалось загрузить форму оплаты. Обновите страницу.</div>';
+                        return;
+                    }}
+                    container.innerHTML = '';
 
-                const blocksApp = new cp.PaymentBlocks(
+                    const blocksApp = new cp.PaymentBlocks(
                     {{
                         publicTerminalId: {json.dumps(CLOUDPAYMENTS_PUBLIC_ID)},
                         paymentSchema: 'Single',
@@ -627,7 +632,8 @@ async def payment_page(user_id: int, request: Request):
                     }}
                 );
 
-                blocksApp.mount(container);
+                    blocksApp.mount(container);
+                }});
             </script>
         </body>
         </html>
