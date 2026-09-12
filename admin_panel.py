@@ -1285,6 +1285,7 @@ async def dashboard_events(request: Request):
     """Stream dashboard invalidations to the browser using Server-Sent Events."""
     queue: asyncio.Queue = asyncio.Queue(maxsize=1)
     _dashboard_subscribers.add(queue)
+    stop_event = _dashboard_listener_stop
 
     async def event_stream():
         try:
@@ -1294,17 +1295,41 @@ async def dashboard_events(request: Request):
             while True:
                 if await request.is_disconnected():
                     break
+                queue_task = asyncio.create_task(queue.get())
+                disconnect_task = asyncio.create_task(request.is_disconnected())
+                wait_tasks = {queue_task, disconnect_task}
+                shutdown_task = None
+                if stop_event is not None:
+                    shutdown_task = asyncio.create_task(stop_event.wait())
+                    wait_tasks.add(shutdown_task)
                 try:
-                    payload = await asyncio.wait_for(queue.get(), timeout=20)
-                    safe_payload = json.dumps(
-                        {"reason": payload or "changed"},
-                        ensure_ascii=False,
+                    done, _ = await asyncio.wait(
+                        wait_tasks,
+                        timeout=20,
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
-                    yield f"event: dashboard\ndata: {safe_payload}\n\n"
-                except asyncio.TimeoutError:
-                    # Keep reverse proxies from closing an otherwise idle SSE
-                    # connection.  A comment is ignored by EventSource.
-                    yield ": heartbeat\n\n"
+                    if shutdown_task is not None and shutdown_task in done:
+                        break
+                    if disconnect_task in done and disconnect_task.result():
+                        break
+                    if queue_task in done:
+                        payload = queue_task.result()
+                        safe_payload = json.dumps(
+                            {"reason": payload or "changed"},
+                            ensure_ascii=False,
+                        )
+                        yield f"event: dashboard\ndata: {safe_payload}\n\n"
+                    else:
+                        # Keep reverse proxies from closing an otherwise idle
+                        # SSE connection.  A comment is ignored by EventSource.
+                        yield ": heartbeat\n\n"
+                finally:
+                    for task in wait_tasks:
+                        if not task.done():
+                            task.cancel()
+                    for task in wait_tasks:
+                        with suppress(asyncio.CancelledError):
+                            await task
         finally:
             _dashboard_subscribers.discard(queue)
 
