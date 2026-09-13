@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, Response
 import os
@@ -30,6 +30,18 @@ app = FastAPI(title="Anonimka — Документация и оплата", lif
 # Compress HTML responses before they cross the network. This reduces transfer
 # time for the payment form and the longer legal documents on mobile/VPN links.
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+
+
+async def _record_payment_link_visit_best_effort(user_id: int) -> None:
+    """Persist analytics after the payment page has been sent to the client."""
+    try:
+        await database.record_payment_link_visit(user_id)
+    except Exception as exc:
+        # A metrics write must never turn a successful page request into an error.
+        print(
+            f"⚠️ Не удалось записать переход к оплате для {user_id}: {exc}",
+            flush=True,
+        )
 
 PAYMENT_FAVICON_SVG = '''
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Валентинка">
@@ -419,7 +431,11 @@ tr:hover { background: #f8f9fa; }
 
 
 @app.get("/pay/{user_id}", response_class=HTMLResponse)
-async def payment_page(user_id: int, request: Request):
+async def payment_page(
+    user_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
     # The consent and checkout views share one database snapshot.  This keeps
     # a page open to one pool checkout instead of three separate connections.
     checkout_requested = request.query_params.get("checkout") == "1"
@@ -442,25 +458,13 @@ async def payment_page(user_id: int, request: Request):
         # A visit is an analytics event only; it must not be confused with a
         # successful CloudPayments transaction.  The checkout URL is a
         # continuation of the same visit, so it is intentionally not counted
-        # a second time.
+        # a second time.  Schedule the write after the response so analytics
+        # cannot delay the payment form on a slow database connection.
         if not checkout_requested:
-            try:
-                await conn.execute(
-                    """
-                    INSERT INTO payment_link_visits (user_id)
-                    VALUES ($1)
-                    ON CONFLICT (user_id) DO UPDATE SET
-                        visit_count = payment_link_visits.visit_count + 1,
-                        last_visited_at = CURRENT_TIMESTAMP
-                    """,
-                    user_id,
-                )
-            except Exception as exc:
-                # Analytics must not prevent a user from opening the page.
-                print(
-                    f"⚠️ Не удалось записать переход к оплате для {user_id}: {exc}",
-                    flush=True,
-                )
+            background_tasks.add_task(
+                _record_payment_link_visit_best_effort,
+                user_id,
+            )
 
         show_checkboxes = row["show_checkboxes"]
 
