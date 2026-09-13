@@ -1379,11 +1379,12 @@ async def dashboard_events(request: Request):
             # covers events that happened while a browser was reconnecting.
             yield 'event: dashboard\ndata: {"reason":"connected"}\n\n'
             while True:
-                if await request.is_disconnected():
-                    break
+                # The ASGI server cancels this generator when the client
+                # disconnects.  Calling request.is_disconnected() as a task
+                # here is unsafe: some servers return immediately with
+                # ``False``, turning the heartbeat timeout into a busy loop.
                 queue_task = asyncio.create_task(queue.get())
-                disconnect_task = asyncio.create_task(request.is_disconnected())
-                wait_tasks = {queue_task, disconnect_task}
+                wait_tasks = {queue_task}
                 shutdown_task = None
                 if stop_event is not None:
                     shutdown_task = asyncio.create_task(stop_event.wait())
@@ -1395,8 +1396,6 @@ async def dashboard_events(request: Request):
                         return_when=asyncio.FIRST_COMPLETED,
                     )
                     if shutdown_task is not None and shutdown_task in done:
-                        break
-                    if disconnect_task in done and disconnect_task.result():
                         break
                     if queue_task in done:
                         payload = queue_task.result()
