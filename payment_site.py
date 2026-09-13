@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, Response
 import os
 import json
@@ -26,6 +27,9 @@ async def lifespan(app: FastAPI):
         print("Database pool closed", flush=True)
 
 app = FastAPI(title="Anonimka — Документация и оплата", lifespan=lifespan)
+# Compress HTML responses before they cross the network. This reduces transfer
+# time for the payment form and the longer legal documents on mobile/VPN links.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 PAYMENT_FAVICON_SVG = '''
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Валентинка">
