@@ -161,7 +161,20 @@ async def claim_recipient_batch(job_id: int, limit: int = BATCH_SIZE):
         async with conn.transaction():
             return await conn.fetch(
                 """
-                WITH picked AS (
+                WITH expired_new_users AS (
+                    UPDATE broadcast_job_recipients AS recipients
+                    SET status = 'cancelled',
+                        error_code = 'new_user_cooldown',
+                        error_message = 'User is within the first 3 days after registration',
+                        updated_at = NOW()
+                    FROM users
+                    WHERE recipients.job_id = $1
+                      AND recipients.status = 'pending'
+                      AND users.telegram_id = recipients.user_id
+                      AND users.registered_at IS NOT NULL
+                      AND users.registered_at > NOW() - INTERVAL '3 days'
+                    RETURNING recipients.user_id
+                ), picked AS (
                     SELECT job_id, user_id
                     FROM broadcast_job_recipients
                     WHERE job_id = $1 AND status = 'pending'

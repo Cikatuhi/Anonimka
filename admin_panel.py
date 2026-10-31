@@ -2732,7 +2732,11 @@ async def send_broadcast(request: Request, message: str = Form(...)):
                     INSERT INTO broadcast_job_recipients (job_id, user_id)
                     SELECT $1, users.telegram_id
                     FROM users
-                    WHERE NOT EXISTS (
+                    WHERE (
+                        users.registered_at IS NULL
+                        OR users.registered_at <= NOW() - INTERVAL '3 days'
+                    )
+                    AND NOT EXISTS (
                         SELECT 1
                         FROM unsubscribed_users
                         WHERE unsubscribed_users.telegram_id = users.telegram_id
