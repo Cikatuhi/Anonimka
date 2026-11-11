@@ -692,6 +692,7 @@ async def lifespan(app: FastAPI):
     await database.init_pool()
     await database.ensure_broadcast_schema()
     await database.ensure_payment_link_visits_schema()
+    await database.ensure_private_link_users_schema()
     conn = await database.get_conn()
     try:
         async with database.schema_migration_lock(conn):
@@ -827,6 +828,7 @@ MENU = '''
         <a class="nav-link" data-nav href="/"><span class="nav-icon">⌂</span><span>Обзор</span></a>
         <a class="nav-link" data-nav href="/users"><span class="nav-icon">◎</span><span>Пользователи</span></a>
         <a class="nav-link" data-nav href="/messages"><span class="nav-icon">≋</span><span>Сообщения</span></a>
+        <a class="nav-link" data-nav href="/private-links"><span class="nav-icon">🔒</span><span>Приватные ссылки</span></a>
     </div>
     <div class="nav-section">
         <div class="nav-section-title">Монетизация</div>
@@ -1683,6 +1685,81 @@ async def users_page(request: Request):
     
     menu = MENU.replace('👥 Пользователи', '<span style="color:#7c3aed; text-shadow: 0 0 30px #7c3aed44;">👥 Пользователи</span>')
     return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
+
+
+@app.get("/private-links", response_class=HTMLResponse)
+async def private_links_page(request: Request):
+    rows = await database.get_private_link_users()
+    notice = request.query_params.get("notice")
+    notice_html = ""
+    if notice == "added":
+        notice_html = '<div class="empty" style="color:var(--success);">Пользователь добавлен: его ссылка теперь приватная.</div>'
+    elif notice == "exists":
+        notice_html = '<div class="empty">Этот пользователь уже добавлен.</div>'
+    elif notice == "unknown":
+        notice_html = '<div class="empty" style="color:var(--danger);">Такой ID не найден среди пользователей бота.</div>'
+    elif notice == "invalid":
+        notice_html = '<div class="empty" style="color:var(--danger);">Введите корректный положительный Telegram ID.</div>'
+    elif notice == "removed":
+        notice_html = '<div class="empty" style="color:var(--success);">Приватный режим отключён.</div>'
+
+    html = '''
+        <div class="page-title">🔒 Приватные ссылки</div>
+        <p class="panel-copy">Добавь Telegram ID пользователя — отправить сообщение по его ссылке смогут только пользователи с активным Premium. Получатель не сможет раскрыть отправителя через кнопку «Узнать кто это».</p>
+        <form action="/private-links/add" method="post" class="panel" style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:18px 0;">
+            <div style="flex:1;min-width:220px;">
+                <label for="telegram_id">Telegram ID пользователя</label>
+                <input id="telegram_id" name="telegram_id" type="text" inputmode="numeric" pattern="[0-9]+" placeholder="Например, 1379865171" required>
+            </div>
+            <button class="button" type="submit">Сделать ссылку приватной</button>
+        </form>
+    '''
+    html += notice_html
+    if rows:
+        html += '<div class="table-container"><table><tr><th>Telegram ID</th><th>Username</th><th>Имя</th><th>Добавлен</th><th></th></tr>'
+        for row in rows:
+            username = escape(str(row.get("username") or "—"))
+            first_name = escape(str(row.get("first_name") or "—"))
+            html += f'''
+                <tr>
+                    <td>{row['telegram_id']}</td>
+                    <td>{username}</td>
+                    <td>{first_name}</td>
+                    <td>{format_admin_datetime(row.get('enabled_at'))}</td>
+                    <td><form action="/private-links/remove/{row['telegram_id']}" method="post" onsubmit="return confirm('Отключить приватный режим для этого пользователя?')"><button class="button button-secondary" type="submit">Отключить</button></form></td>
+                </tr>
+            '''
+        html += '</table></div>'
+    else:
+        html += '<div class="empty">Пока нет пользователей с приватными ссылками.</div>'
+
+    menu = MENU.replace('Приватные ссылки', '<span style="color:#7c3aed;">Приватные ссылки</span>')
+    return HTMLResponse(content=BASE_HTML.replace('MENU_PLACEHOLDER', menu).replace('CONTENT_PLACEHOLDER', html))
+
+
+@app.post("/private-links/add")
+async def add_private_link(request: Request, telegram_id: str = Form(...)):
+    try:
+        user_id = int(telegram_id.strip())
+        if user_id <= 0:
+            raise ValueError
+    except (AttributeError, TypeError, ValueError):
+        return RedirectResponse(url="/private-links?notice=invalid", status_code=303)
+
+    added = await database.add_private_link_user(user_id)
+    if added:
+        notice = "added"
+    elif await database.get_user(user_id):
+        notice = "exists"
+    else:
+        notice = "unknown"
+    return RedirectResponse(url=f"/private-links?notice={notice}", status_code=303)
+
+
+@app.post("/private-links/remove/{user_id}")
+async def remove_private_link(user_id: int):
+    await database.remove_private_link_user(user_id)
+    return RedirectResponse(url="/private-links?notice=removed", status_code=303)
 
 
 @app.get("/messages", response_class=HTMLResponse)

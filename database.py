@@ -10,7 +10,7 @@ import ssl
 from time import monotonic
 from contextlib import asynccontextmanager
 import aiohttp
-from time_utils import to_db_timestamp
+from time_utils import as_utc, now_msk, to_db_timestamp
 
 load_dotenv()
 
@@ -714,6 +714,7 @@ async def init_db():
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_unsubscribed_users_id ON unsubscribed_users(telegram_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_tokens_token ON payment_tokens(token)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_tokens_user_id ON payment_tokens(user_id)")
+            await _ensure_private_link_users_schema(conn)
             await ensure_admin_dashboard_notifications(conn)
 
             print("✅ База данных инициализирована")
@@ -723,6 +724,104 @@ async def init_db():
 # ============================================
 # ОСТАЛЬНЫЕ ФУНКЦИИ (ПОЛНЫЙ СПИСОК)
 # ============================================
+
+async def _ensure_private_link_users_schema(conn):
+    """Store users whose incoming-message links require Premium senders."""
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS private_link_users (
+            telegram_id BIGINT PRIMARY KEY,
+            enabled_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
+async def ensure_private_link_users_schema():
+    conn = await get_conn()
+    try:
+        async with schema_migration_lock(conn):
+            await _ensure_private_link_users_schema(conn)
+    finally:
+        await release_conn(conn)
+
+
+async def is_private_link_user(user_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        return bool(await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM private_link_users WHERE telegram_id = $1)",
+            user_id,
+        ))
+    finally:
+        await release_conn(conn)
+
+
+async def get_private_link_users():
+    conn = await get_conn()
+    try:
+        rows = await conn.fetch("""
+            SELECT p.telegram_id, p.enabled_at, u.username, u.first_name
+            FROM private_link_users AS p
+            LEFT JOIN users AS u ON u.telegram_id = p.telegram_id
+            ORDER BY p.enabled_at DESC, p.telegram_id DESC
+        """)
+        return [dict(row) for row in rows]
+    finally:
+        await release_conn(conn)
+
+
+async def add_private_link_user(user_id: int) -> bool:
+    """Enable private-link mode only for an existing bot user; return if added."""
+    conn = await get_conn()
+    try:
+        row = await conn.fetchrow("""
+            INSERT INTO private_link_users (telegram_id)
+            SELECT telegram_id FROM users WHERE telegram_id = $1
+            ON CONFLICT (telegram_id) DO NOTHING
+            RETURNING telegram_id
+        """, user_id)
+        return row is not None
+    finally:
+        await release_conn(conn)
+
+
+async def remove_private_link_user(user_id: int) -> bool:
+    conn = await get_conn()
+    try:
+        result = await conn.execute(
+            "DELETE FROM private_link_users WHERE telegram_id = $1", user_id
+        )
+        return result.endswith("1")
+    finally:
+        await release_conn(conn)
+
+
+async def user_has_active_premium(user_id: int) -> bool:
+    """Mirror the bot's paid-access rule, including unused manual cancellation time."""
+    conn = await get_conn()
+    try:
+        row = await conn.fetchrow("""
+            SELECT s.status, s.end_date, u.reason AS cancellation_reason
+            FROM subscriptions AS s
+            LEFT JOIN unsubscribed_users AS u ON u.telegram_id = s.user_id
+            WHERE s.user_id = $1
+            ORDER BY s.created_at DESC
+            LIMIT 1
+        """, user_id)
+    finally:
+        await release_conn(conn)
+
+    if not row:
+        return False
+    end_date = row["end_date"]
+    return (
+        row["status"] == "active"
+        and (end_date is None or as_utc(end_date) > as_utc(now_msk()))
+    ) or (
+        row["status"] == "cancelled"
+        and row["cancellation_reason"] == "manual"
+        and end_date is not None
+        and as_utc(end_date) > as_utc(now_msk())
+    )
 
 async def register_user(
     user_id: int,

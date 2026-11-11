@@ -84,6 +84,19 @@ def _remember_active_session(user_id: int, recipient_id: int, recipient_name: st
     }
 
 
+async def _send_private_premium_required(message, sender_id: int) -> None:
+    """Explain why a private link is gated and direct the sender to checkout."""
+    keyboard = [[InlineKeyboardButton(
+        "⭐ Оформить Premium",
+        url=f"{SITE_URL}/pay/{sender_id}",
+    )]]
+    await message.reply_text(
+        "🔒 Эта ссылка приватная. Написать по ней могут только пользователи с активным Premium.\n\n"
+        "Оформи Premium, затем снова открой личную ссылку этого человека.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+
 def _remember_reply_session(user_id: int, original_sender_id: int) -> None:
     """Store a bounded, expiring reply session."""
     now = _session_now()
@@ -229,6 +242,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logging.warning("Ignoring malformed /start deep-link argument: %r", args[0])
 
         if recipient_id is not None and recipient_id != user_id:
+            is_private_link = await database.is_private_link_user(recipient_id)
+            if is_private_link and not await database.user_has_active_premium(user_id):
+                await _send_private_premium_required(update.message, user_id)
+                return
+
             recipient_data = await database.get_user(recipient_id)
             if recipient_data:
                 recipient_name = recipient_data['first_name']
@@ -421,17 +439,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recipient_name = session['recipient_name']
 
     try:
+        is_private_link = await database.is_private_link_user(recipient_id)
+        if is_private_link and not await database.user_has_active_premium(user_id):
+            await _send_private_premium_required(update.message, user_id)
+            return
+    except Exception:
+        logging.exception("Не удалось проверить доступ к приватной ссылке")
+        await update.message.reply_text(
+            "⚠️ Не удалось проверить Premium. Сообщение не отправлено — попробуйте ещё раз позже."
+        )
+        return
+
+    try:
         reply_keyboard = [
             [InlineKeyboardButton("✍️ Ответить", callback_data=f"reply_{user_id}")],
-            [InlineKeyboardButton(
+        ]
+        if not is_private_link:
+            reply_keyboard.append([InlineKeyboardButton(
                 "Узнать кто это",
                 callback_data=f"who_is_it_{user_id}",
                 api_kwargs={
                     "style": "primary",
                     "icon_custom_emoji_id": "5424885441100782420",
                 },
-            )]
-        ]
+            )])
         reply_markup = InlineKeyboardMarkup(reply_keyboard)
 
         content = "медиа-файл"
