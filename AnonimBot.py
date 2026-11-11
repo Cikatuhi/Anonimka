@@ -87,12 +87,13 @@ def _remember_active_session(user_id: int, recipient_id: int, recipient_name: st
 async def _send_private_premium_required(message, sender_id: int) -> None:
     """Explain why a private link is gated and direct the sender to checkout."""
     keyboard = [[InlineKeyboardButton(
-        "⭐ Оформить Premium",
+        "Оформить Premium",
         url=f"{SITE_URL}/pay/{sender_id}",
+        api_kwargs={"style": "primary"},
     )]]
     await message.reply_text(
         "🔒 Эта ссылка приватная. Написать по ней могут только пользователи с активным Premium.\n\n"
-        "Оформи Premium, затем снова открой личную ссылку этого человека.",
+        "Оформи Premium за 5р, затем снова открой личную ссылку этого человека.",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
