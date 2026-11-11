@@ -1716,7 +1716,7 @@ async def private_links_page(request: Request):
     '''
     html += notice_html
     if rows:
-        html += '<div class="table-container"><table><tr><th>Telegram ID</th><th>Username</th><th>Имя</th><th>Добавлен</th><th></th></tr>'
+        html += '<div class="table-container"><table><tr><th>Telegram ID</th><th>Username</th><th>Имя</th><th>Открыли (людей)</th><th>Добавлен</th><th></th></tr>'
         for row in rows:
             username = escape(str(row.get("username") or "—"))
             first_name = escape(str(row.get("first_name") or "—"))
@@ -1725,6 +1725,7 @@ async def private_links_page(request: Request):
                     <td>{row['telegram_id']}</td>
                     <td>{username}</td>
                     <td>{first_name}</td>
+                    <td>{row['unique_visitors']}</td>
                     <td>{format_admin_datetime(row.get('enabled_at'))}</td>
                     <td><form action="/private-links/remove/{row['telegram_id']}" method="post" onsubmit="return confirm('Отключить приватный режим для этого пользователя?')"><button class="button button-secondary" type="submit">Отключить</button></form></td>
                 </tr>

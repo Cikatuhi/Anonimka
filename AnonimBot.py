@@ -244,9 +244,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if recipient_id is not None and recipient_id != user_id:
             is_private_link = await database.is_private_link_user(recipient_id)
-            if is_private_link and not await database.user_has_active_premium(user_id):
-                await _send_private_premium_required(update.message, user_id)
-                return
+            if is_private_link:
+                await database.record_private_link_visit(recipient_id, user_id)
+                if not await database.user_has_active_premium(user_id):
+                    await _send_private_premium_required(update.message, user_id)
+                    return
 
             recipient_data = await database.get_user(recipient_id)
             if recipient_data:

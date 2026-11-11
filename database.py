@@ -733,6 +733,14 @@ async def _ensure_private_link_users_schema(conn):
             enabled_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS private_link_visits (
+            recipient_id BIGINT NOT NULL,
+            visitor_id BIGINT NOT NULL,
+            opened_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (recipient_id, visitor_id)
+        )
+    """)
 
 
 async def ensure_private_link_users_schema():
@@ -759,12 +767,36 @@ async def get_private_link_users():
     conn = await get_conn()
     try:
         rows = await conn.fetch("""
-            SELECT p.telegram_id, p.enabled_at, u.username, u.first_name
+            SELECT p.telegram_id, p.enabled_at, u.username, u.first_name,
+                   COALESCE(v.unique_visitors, 0)::int AS unique_visitors
             FROM private_link_users AS p
             LEFT JOIN users AS u ON u.telegram_id = p.telegram_id
+            LEFT JOIN (
+                SELECT recipient_id, COUNT(*) AS unique_visitors
+                FROM private_link_visits
+                GROUP BY recipient_id
+            ) AS v ON v.recipient_id = p.telegram_id
             ORDER BY p.enabled_at DESC, p.telegram_id DESC
         """)
         return [dict(row) for row in rows]
+    finally:
+        await release_conn(conn)
+
+
+async def record_private_link_visit(recipient_id: int, visitor_id: int) -> None:
+    """Count a distinct Telegram user opening an enabled private link."""
+    if recipient_id == visitor_id:
+        return
+    conn = await get_conn()
+    try:
+        await conn.execute("""
+            INSERT INTO private_link_visits (recipient_id, visitor_id)
+            SELECT $1, $2
+            WHERE EXISTS (
+                SELECT 1 FROM private_link_users WHERE telegram_id = $1
+            )
+            ON CONFLICT (recipient_id, visitor_id) DO NOTHING
+        """, recipient_id, visitor_id)
     finally:
         await release_conn(conn)
 
