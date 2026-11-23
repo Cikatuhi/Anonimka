@@ -26,6 +26,9 @@ class CloudPaymentsClient:
             "Currency": "RUB",
             "InvoiceId": f"sub_{account_id}_{int(datetime.utcnow().timestamp())}",
             "Description": f"Subscription payment for user {account_id}",
+            # Server-initiated recurring charge based on a previously saved token.
+            "TrInitiatorCode": 0,
+            "PaymentScheduled": 1,
         }
         
         try:
