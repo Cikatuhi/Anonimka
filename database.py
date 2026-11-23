@@ -1466,7 +1466,10 @@ async def restore_unsubscribed_user(user_id: int):
                 plan = item.get("plan") or archive.get("subscription_plan") or "HIGH"
                 start_date = _restore_snapshot_datetime(item.get("start_date"))
                 end_date = _restore_snapshot_datetime(item.get("end_date"))
-                status = item.get("status") or archive.get("subscription_status") or "active"
+                # A cancelled row is what gets archived.  Restoring that
+                # snapshot as-is would keep it invisible to the charge
+                # scheduler, so a manual restore explicitly reactivates it.
+                status = "active"
                 created_at = _restore_snapshot_datetime(
                     item.get("created_at") or archive.get("subscription_created_at")
                 )
@@ -1485,8 +1488,8 @@ async def restore_unsubscribed_user(user_id: int):
                             end_date = $5,
                             status = $6,
                             created_at = COALESCE($7, created_at),
-                            next_retry_at = $8
-                        WHERE id = $9 AND user_id = $10
+                            next_retry_at = NULL
+                        WHERE id = $8 AND user_id = $9
                         """,
                         subscription_id,
                         card_token,
@@ -1495,7 +1498,6 @@ async def restore_unsubscribed_user(user_id: int):
                         end_date,
                         status,
                         created_at,
-                        next_retry_at,
                         record_id,
                         user_id,
                     )
@@ -1514,13 +1516,12 @@ async def restore_unsubscribed_user(user_id: int):
                     """,
                     user_id,
                     subscription_id,
-                    card_token,
                     plan,
                     start_date,
                     end_date,
                     status,
                     created_at,
-                    next_retry_at,
+                    None,
                 )
                 restored_ids.append(inserted["id"])
 
