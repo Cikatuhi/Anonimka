@@ -850,6 +850,11 @@ async def who_is_it_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     first_name = user.first_name or "Пользователь"
     
     await database.register_user(user_id, username, first_name)
+
+    try:
+        await database.record_who_is_it_clicker(user_id)
+    except Exception:
+        logging.exception("Не удалось записать уникальное нажатие «Узнать кто это»")
     
     callback_data = query.data
     sender_id = None

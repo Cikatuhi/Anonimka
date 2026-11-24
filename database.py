@@ -276,6 +276,7 @@ async def ensure_admin_dashboard_notifications(conn):
         "unsubscribed_users": "INSERT OR DELETE",
         "messages": "INSERT OR DELETE",
         "payment_link_visits": "INSERT OR DELETE",
+        "who_is_it_clickers": "INSERT",
         # Successful payment totals are built from both webhook journal rows
         # and the recurrent-payment ledger.  Both tables are append-only.
         "webhook_events": "INSERT",
@@ -299,6 +300,16 @@ async def ensure_admin_dashboard_notifications(conn):
                 AFTER {operations} ON public."{table_name}"
                 FOR EACH STATEMENT EXECUTE FUNCTION notify_admin_dashboard_change()'''
         )
+
+
+async def ensure_who_is_it_clickers_schema(conn):
+    """Create the lifetime unique-click ledger used by the dashboard."""
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS who_is_it_clickers (
+            user_id BIGINT PRIMARY KEY,
+            first_clicked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
 
 async def _ensure_unsubscribed_schema(conn):
@@ -701,7 +712,9 @@ async def init_db():
                 expires_at TIMESTAMP DEFAULT (NOW() + INTERVAL '1 hour')
             )
         """)
-        
+
+            await ensure_who_is_it_clickers_schema(conn)
+
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_registered_at ON users(registered_at DESC)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC)")
@@ -718,6 +731,19 @@ async def init_db():
             await ensure_admin_dashboard_notifications(conn)
 
             print("✅ База данных инициализирована")
+    finally:
+        await release_conn(conn)
+
+
+async def record_who_is_it_clicker(user_id: int) -> None:
+    """Persist one row per Telegram user who clicks the reveal button."""
+    conn = await get_conn()
+    try:
+        await conn.execute("""
+            INSERT INTO who_is_it_clickers (user_id)
+            VALUES ($1)
+            ON CONFLICT (user_id) DO NOTHING
+        """, user_id)
     finally:
         await release_conn(conn)
 
@@ -1516,6 +1542,7 @@ async def restore_unsubscribed_user(user_id: int):
                     """,
                     user_id,
                     subscription_id,
+                    card_token,
                     plan,
                     start_date,
                     end_date,

@@ -448,6 +448,7 @@ SELECT
         )
     ) AS total_users,
     (SELECT COUNT(*) FROM messages) AS total_messages,
+    (SELECT COUNT(*) FROM who_is_it_clickers) AS who_is_it_unique_users,
     (
         SELECT COUNT(*)
         FROM subscriptions
@@ -520,6 +521,7 @@ def _normalize_dashboard_stats(row) -> dict:
         "total_users": int(row["total_users"] or 0),
         "users_today": int(row["users_today"] or 0),
         "total_messages": int(row["total_messages"] or 0),
+        "who_is_it_unique_users": int(row["who_is_it_unique_users"] or 0),
         "messages_today": int(row["messages_today"] or 0),
         "total_subscriptions": int(row["total_subscriptions"] or 0),
         "subscriptions_today": int(row["subscriptions_today"] or 0),
@@ -699,6 +701,7 @@ async def lifespan(app: FastAPI):
             await database.ensure_webhook_events_schema(conn)
             await database.ensure_payment_events_schema(conn)
             await database.ensure_payment_events_user_fk_protection(conn)
+            await database.ensure_who_is_it_clickers_schema(conn)
             await database.ensure_admin_dashboard_notifications(conn)
     finally:
         await database.release_conn(conn)
@@ -1342,6 +1345,7 @@ async def dashboard_data(request: Request):
                 "total_users": stats["total_users"],
                 "users_today": stats["users_today"],
                 "total_messages": stats["total_messages"],
+                "who_is_it_unique_users": stats["who_is_it_unique_users"],
                 "messages_today": stats["messages_today"],
                 "total_subscriptions": stats["total_subscriptions"],
                 "subscriptions_today": stats["subscriptions_today"],
@@ -1436,6 +1440,7 @@ async def dashboard(request: Request):
     total_users = 0
     users_today = 0
     total_messages = 0
+    who_is_it_unique_users = 0
     messages_today = 0
     total_subscriptions = 0
     subscriptions_today = 0
@@ -1458,6 +1463,7 @@ async def dashboard(request: Request):
         total_users = stats["total_users"]
         users_today = stats["users_today"]
         total_messages = stats["total_messages"]
+        who_is_it_unique_users = stats["who_is_it_unique_users"]
         messages_today = stats["messages_today"]
         total_subscriptions = stats["total_subscriptions"]
         subscriptions_today = stats["subscriptions_today"]
@@ -1498,6 +1504,7 @@ async def dashboard(request: Request):
         <div class="stat-card"><span class="icon">◎</span><div class="stat-number" id="dashboard-total-users">{format_dashboard_number(total_users)}</div><div class="stat-label">Доступные пользователи</div><div class="stat-today" id="dashboard-users-today">+{format_dashboard_number(users_today)} за сегодня</div>{dashboard_sparkline_svg(users_today_chart, 'dashboard-users-chart')}</div>
         <div class="stat-card"><span class="icon">◇</span><div class="stat-number" id="dashboard-total-subscriptions">{format_dashboard_number(total_subscriptions)}</div><div class="stat-label">Активные подписки</div><div class="stat-today" id="dashboard-subscriptions-today">+{format_dashboard_number(subscriptions_today)} за сегодня</div>{dashboard_sparkline_svg(subscriptions_today_chart, 'dashboard-subscriptions-chart')}</div>
         <div class="stat-card"><span class="icon">≋</span><div class="stat-number" id="dashboard-total-messages">{format_dashboard_number(total_messages)}</div><div class="stat-label">Сообщений отправлено</div><div class="stat-today" id="dashboard-messages-today">+{format_dashboard_number(messages_today)} за сегодня</div>{dashboard_sparkline_svg(messages_today_chart, 'dashboard-messages-chart')}</div>
+        <div class="stat-card"><span class="icon">◎</span><div class="stat-number" id="dashboard-who-is-it-users">{format_dashboard_number(who_is_it_unique_users)}</div><div class="stat-label">Нажали «Узнать кто это»</div><div class="stat-today">Уникальные пользователи</div></div>
         <div class="stat-card"><span class="icon">↗</span><div class="stat-number" id="dashboard-payment-visitors">{format_dashboard_number(payment_visitors)}</div><div class="stat-label">Перешли к оплате</div><div class="stat-today" id="dashboard-payment-visitors-today">+{format_dashboard_number(payment_visitors_today)} за сегодня</div>{dashboard_sparkline_svg(payment_visitors_today_chart, 'dashboard-payment-visitors-chart')}</div>
     </div>
     <div class="quick-grid">
@@ -1571,6 +1578,7 @@ async def dashboard(request: Request):
                 document.getElementById('dashboard-total-messages').textContent = data.total_messages.toLocaleString('ru-RU');
                 document.getElementById('dashboard-messages-today').textContent = '+' + data.messages_today.toLocaleString('ru-RU') + ' за сегодня';
                 updateChart('dashboard-messages-chart', data.messages_today_chart);
+                document.getElementById('dashboard-who-is-it-users').textContent = data.who_is_it_unique_users.toLocaleString('ru-RU');
                 document.getElementById('dashboard-payment-visitors').textContent = data.payment_visitors.toLocaleString('ru-RU');
                 document.getElementById('dashboard-payment-visitors-today').textContent = '+' + data.payment_visitors_today.toLocaleString('ru-RU') + ' за сегодня';
                 updateChart('dashboard-payment-visitors-chart', data.payment_visitors_today_chart);
